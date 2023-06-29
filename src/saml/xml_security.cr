@@ -37,17 +37,17 @@ module XMLSecurity
         case algorithm
         when "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
             "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments"
-          Nokogiri::XML::XML_C14N_1_0
+          XML::C14N::Mode::C14N_1_0
         when "http://www.w3.org/2006/12/xml-c14n11",
             "http://www.w3.org/2006/12/xml-c14n11#WithComments"
-          Nokogiri::XML::XML_C14N_1_1
+          XML::C14N::Mode::C14N_1_1
         else
-          Nokogiri::XML::XML_C14N_EXCLUSIVE_1_0
+          XML::C14N::Mode::C14N_EXCLUSIVE_1_0
         end
       end
     end
 
-    def algorithm(element)
+    def algorithm(element : XML::Node | String)
       if algorithm = element
         if algorithm.is_a?(XML::Node)
           algorithm = element["Algorithm"]
@@ -57,11 +57,11 @@ module XMLSecurity
       end
 
       case algorithm
-      when 256 then Digest::SHA256
+      when 256 then Digest::SHA256.new
       #when 384 then Digest::SHA384 # not supported in Crystal
-      when 512 then Digest::SHA512
+      when 512 then Digest::SHA512.new
       else
-        Digest::SHA1
+        Digest::SHA1.new
       end
     end
   end
@@ -106,30 +106,50 @@ module XMLSecurity
     def sign_document(private_key, certificate, signature_method = RSA_SHA1, digest_method = SHA1)
       noko = XML.parse(self.to_s, XML_PARSER_OPTIONS)
 
-      signature_element = REXML::Element.new("ds:Signature").add_namespace("ds", DSIG)
-      signed_info_element = signature_element.add_element("ds:SignedInfo")
-      signed_info_element.add_element("ds:CanonicalizationMethod", { "Algorithm" => C14N })
-      signed_info_element.add_element("ds:SignatureMethod", { "Algorithm" => signature_method })
+      signature_element = XML.build_fragment do |xml|
+        xml.element("ds:Signature") do |signature_element|
+          signature_element.element("ds:SignedInfo") do |signed_info_element|
+            signature_element.element("ds:CanonicalizationMethod", { "Algorithm" => C14N })
+            signature_element.element("ds:SignatureMethod", { "Algorithm" => signature_method })
 
-      # Add Reference
-      reference_element = signed_info_element.add_element("ds:Reference", { "URI" => "##{uuid}" })
+            # Add Reference
+            reference_element = signed_info_element.element("ds:Reference", { "URI" => "##{uuid}" })
+
+            digest_method_element = reference_element.element("ds:DigestMethod", { "Algorithm" => digest_method })
+            inclusive_namespaces = INC_PREFIX_LIST.split(" ")
+            canon_doc = noko.canonicalize(mode: canon_algorithm(C14N), inclusive_ns: inclusive_namespaces)
+            reference_element.element("ds:DigestValue") do |digest_value_element|
+              digest_value_element.text compute_digest(canon_doc, algorithm(digest_method))
+            end
+          end
+        end
+      end
+
+      # signature_element = REXML::Element.new("ds:Signature").add_namespace("ds", DSIG)
+      # signed_info_element = signature_element.add_element("ds:SignedInfo")
+      # signed_info_element.add_element("ds:CanonicalizationMethod", { "Algorithm" => C14N })
+      # signed_info_element.add_element("ds:SignatureMethod", { "Algorithm" => signature_method })
+
+      transforms_element = XML.build_fragment do |xml|
+        xml.element("ds:Transforms") do |transforms_element|
+          transforms_element.element("ds:Transform", { "Algorithm" => ENVELOPED_SIG })
+          transforms_element.element("ds:Transform", { "Algorithm" => C14N }) do |c14element|
+            c14element.element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
+          end
+        end
+      end
 
       # Add Transforms
-      transforms_element = reference_element.add_element("ds:Transforms")
-      transforms_element.add_element("ds:Transform", { "Algorithm" => ENVELOPED_SIG })
-      c14element = transforms_element.add_element("ds:Transform", { "Algorithm" => C14N })
-      c14element.add_element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
-
-      digest_method_element = reference_element.add_element("ds:DigestMethod", { "Algorithm" => digest_method })
-      inclusive_namespaces = INC_PREFIX_LIST.split(" ")
-      canon_doc = noko.canonicalize(canon_algorithm(C14N), inclusive_namespaces)
-      reference_element.add_element("ds:DigestValue").text = compute_digest(canon_doc, algorithm(digest_method_element))
+      # transforms_element = reference_element.add_element("ds:Transforms")
+      # transforms_element.add_element("ds:Transform", { "Algorithm" => ENVELOPED_SIG })
+      # c14element = transforms_element.add_element("ds:Transform", { "Algorithm" => C14N })
+      # c14element.add_element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
 
       # add SignatureValue
-      noko_sig_element = XML.Parse(signature_element.to_s, XML_PARSER_OPTIONS)
+      noko_sig_element = XML.Parse(signature_element, XML_PARSER_OPTIONS)
 
       noko_signed_info_element = noko_sig_element.at_xpath("//ds:Signature/ds:SignedInfo", {"ds" => DSIG})
-      canon_string = noko_signed_info_element.canonicalize(canon_algorithm(C14N))
+      canon_string = noko_signed_info_element.canonicalize(mode: canon_algorithm(C14N))
 
       signature = compute_signature(private_key, algorithm(signature_method).new, canon_string)
       signature_element.add_element("ds:SignatureValue").text = signature
@@ -182,31 +202,33 @@ module XMLSecurity
 
     def validate_document(idp_cert_fingerprint, soft = true, options = {} of Symbol => String)
       # get cert from response
-      cert_element = REXML::XPath.first(
-        self,
+      cert_element = self.xpath_node(
         "//ds:X509Certificate",
         { "ds" => DSIG }
       )
 
       if cert_element
-        base64_cert = Saml::Utils.element_text(cert_element)
-        cert_text = Base64.decode(base64_cert)
-        begin
-          cert = OpenSSL::X509::Certificate.new(cert_text)
-        rescue _e : OpenSSL::X509::CertificateError
-          return append_error("Document Certificate Error", soft)
-        end
+        if base64_cert = Saml::Utils.element_text(cert_element)
+          cert_text = Base64.decode_string(base64_cert)
+          begin
+            cert = OpenSSL::X509::Certificate.new(cert_text)
+          rescue _e : OpenSSL::X509::CertificateError
+            return append_error("Document Certificate Error", soft)
+          end
 
-        if options[:fingerprint_alg]
-          fingerprint_alg = XMLSecurity::BaseDocument.new.algorithm(options[:fingerprint_alg]).new
+          if options[:fingerprint_alg]
+            fingerprint_alg = XMLSecurity::BaseDocument.new.algorithm(options[:fingerprint_alg]).new
+          else
+            fingerprint_alg = OpenSSL::Digest.new("SHA1")
+          end
+          fingerprint = fingerprint_alg.hexdigest(cert.to_der)
+
+          # check cert matches registered idp cert
+          if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/, "").downcase
+            return append_error("Fingerprint mismatch", soft)
+          end
         else
-          fingerprint_alg = OpenSSL::Digest.new("SHA1")
-        end
-        fingerprint = fingerprint_alg.hexdigest(cert.to_der)
-
-        # check cert matches registered idp cert
-        if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/, "").downcase
-          return append_error("Fingerprint mismatch", soft)
+          return append_error("No cert element", soft)
         end
       else
         if options[:cert]
@@ -224,15 +246,14 @@ module XMLSecurity
 
     def validate_document_with_cert(idp_cert, soft = true)
       # get cert from response
-      cert_element = REXML::XPath.first(
-        self,
+      cert_element = self.xpath_node(
         "//ds:X509Certificate",
         { "ds" => DSIG }
       )
 
       if cert_element
         base64_cert = Saml::Utils.element_text(cert_element)
-        cert_text = Base64.decode(base64_cert)
+        cert_text = Base64.decode_string(base64_cert)
         begin
           cert = OpenSSL::X509::Certificate.new(cert_text)
         rescue _e : OpenSSL::X509::CertificateError
@@ -281,61 +302,68 @@ module XMLSecurity
         { "ds" => DSIG },
       ))
 
-      noko_sig_element = document.at_xpath("//ds:Signature", { "ds" => DSIG })
-      noko_signed_info_element = noko_sig_element.at_xpath("./ds:SignedInfo", { "ds" => DSIG })
+      noko_sig_element = document.try(&.xpath_node("//ds:Signature", { "ds" => DSIG }))
+      noko_signed_info_element = noko_sig_element.try(&.xpath_node("./ds:SignedInfo", { "ds" => DSIG }))
 
-      canon_string = noko_signed_info_element.canonicalize(canon_algorithm)
-      noko_sig_element.remove
+      canon_string = noko_signed_info_element.try(&.canonicalize(mode: canon_algorithm))
+      noko_sig_element.try(&.unlink)
 
       # get inclusive namespaces
       inclusive_namespaces = extract_inclusive_namespaces
 
       # check digests
-      ref = REXML::XPath.first(sig_element, "//ds:Reference", { "ds" => DSIG })
+      ref = sig_element.try(&.xpath_node("//ds:Reference", { "ds" => DSIG }))
 
-      hashed_element = document.at_xpath("//*[@ID=$id]", nil, { "id" => extract_signed_element_id })
+      hashed_element = document.xpath_node("//*[@ID=$id]", nil, { "id" => extract_signed_element_id })
 
-      canon_algorithm = canon_algorithm ref.xpath_node(
+      canon_algorithm = canon_algorithm ref.try(&.xpath_node(
         "//ds:CanonicalizationMethod",
         { "ds" => DSIG }
-      )
+      ))
 
       canon_algorithm = process_transforms(ref, canon_algorithm)
 
-      canon_hashed_element = hashed_element.canonicalize(canon_algorithm, inclusive_namespaces)
+      canon_hashed_element = hashed_element.try(&.canonicalize(mode: canon_algorithm, inclusive_ns: inclusive_namespaces))
 
-      digest_algorithm = algorithm(ref.xpath_node(
-        "//ds:DigestMethod",
-        { "ds" => DSIG }
-      ))
-      hash = digest_algorithm.digest(canon_hashed_element)
-      encoded_digest_value = ref.xpath_node(
-        "//ds:DigestValue",
-        { "ds" => DSIG }
-      )
-      digest_value = Base64.decode(Saml::Utils.element_text(encoded_digest_value))
+      # pick something absolutely impossible (worried nil might match sometimes)
+      digest_value = "-1"
+
+      if digest_algorithm = algorithm(ref.try(&.xpath_node("//ds:DigestMethod",{ "ds" => DSIG })))
+        if hashed = canon_hashed_element
+          digest_algorithm << hashed
+          hash = digest_algorithm.final
+          encoded_digest_value = ref.try(&.xpath_node("//ds:DigestValue",{ "ds" => DSIG }))
+          if encoded_text = Saml::Utils.element_text(encoded_digest_value)
+            digest_value = Base64.decode(encoded_text)
+          end
+        end
+      end
 
       unless digests_match?(hash, digest_value)
         return append_error("Digest mismatch", soft)
       end
 
       # get certificate object
-      cert_text = Base64.decode(base64_cert)
-      cert = OpenSSL::X509::Certificate.new(cert_text)
+      if bcert = base64_cert
+        cert_text = Base64.decode_string(bcert)
+        cert = OpenSSL::X509::Certificate.new(cert_text)
 
-      # verify signature
-      unless cert.public_key.verify(signature_algorithm.new, signature, canon_string)
-        return append_error("Key validation error", soft)
+        # verify signature
+        unless (sig = signature && (cannonical = canon_string)) && cert.public_key.verify(signature_algorithm, sig, cannonical)
+          return append_error("Key validation error", soft)
+        end
+      else
+        return append_error("Couln't get base64 cert", soft)
       end
 
       return true
     end
 
     private def process_transforms(ref, canon_algorithm)
-      transforms = ref.xpath_nodes(
+      transforms = ref.try(&.xpath_nodes(
         "//ds:Transforms/ds:Transform",
         { "ds" => DSIG }
-      )
+      )) || [] of XML::Node
 
       transforms.each do |transform_element|
         if transform_element.attributes && transform_element.attributes["Algorithm"]
@@ -343,13 +371,13 @@ module XMLSecurity
           case algorithm
           when "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
                "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments"
-            canon_algorithm = Nokogiri::XML::XML_C14N_1_0
+            canon_algorithm = XML::C14N::Mode::C14N_1_0
           when "http://www.w3.org/2006/12/xml-c14n11",
                "http://www.w3.org/2006/12/xml-c14n11#WithComments"
-            canon_algorithm = Nokogiri::XML::XML_C14N_1_1
+            canon_algorithm = XML::C14N::Mode::C14N_1_1
           when "http://www.w3.org/2001/10/xml-exc-c14n#",
                "http://www.w3.org/2001/10/xml-exc-c14n#WithComments"
-            canon_algorithm = Nokogiri::XML::XML_C14N_EXCLUSIVE_1_0
+            canon_algorithm = XML::C14N::Mode::C14N_EXCLUSIVE_1_0
           end
         end
       end
@@ -369,8 +397,16 @@ module XMLSecurity
 
       return nil if reference_element.nil?
 
-      sei = reference_element.attribute("URI").value[1..-1]
-      sei.nil? ? reference_element.parent.parent.parent.attribute("ID").value : sei
+      sei = reference_element["URI"][1..-1]
+      if sei.nil?
+        if node = reference_element.parent.try(&.parent).try(&.parent)
+          if id = node["ID"]
+            return id
+          end
+        end
+
+        sei
+      end
     end
 
     private def extract_inclusive_namespaces
@@ -379,10 +415,10 @@ module XMLSecurity
         { "ec" => C14N }
       )
       if element
-        prefix_list = element.attributes.get_attribute("PrefixList").value
+        prefix_list = element.attributes["PrefixList"].text
         prefix_list.split(" ")
       else
-        nil
+        [] of String
       end
     end
   end

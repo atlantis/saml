@@ -7,7 +7,7 @@ describe "XmlSecurity" do
   let(:document) { XMLSecurity::SignedDocument.new(decoded_response) }
   let(:settings) { Saml::Settings.new() }
 
-  setup do
+  before do
     @base64cert = document.elements["//ds:X509Certificate"].text
   end
 
@@ -84,20 +84,20 @@ end
 
 describe "#canon_algorithm" do
   it "C14N_EXCLUSIVE_1_0" do
-    canon_algorithm = Nokogiri::XML::XML_C14N_EXCLUSIVE_1_0
+    canon_algorithm = XML::C14N::Mode::C14N_EXCLUSIVE_1_0
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("http://www.w3.org/2001/10/xml-exc-c14n#")
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("http://www.w3.org/2001/10/xml-exc-c14n#WithComments")
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("other")
   end
 
   it "C14N_1_0" do
-    canon_algorithm = Nokogiri::XML::XML_C14N_1_0
+    canon_algorithm = XML::C14N::Mode::C14N_1_0
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("http://www.w3.org/TR/2001/REC-xml-c14n-20010315")
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments")
   end
 
   it "XML_C14N_1_1" do
-    canon_algorithm = Nokogiri::XML::XML_C14N_1_1
+    canon_algorithm = XML::C14N::Mode::C14N_1_1
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("http://www.w3.org/2006/12/xml-c14n11")
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.new.canon_algorithm("http://www.w3.org/2006/12/xml-c14n11#WithComments")
   end

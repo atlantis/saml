@@ -189,7 +189,7 @@ module Saml
 
         # Net::HTTP in Ruby 1.8 did not set the default certificate store
         # automatically when VERIFY_PEER was specified.
-        if RUBY_VERSION < "1.9" && !http.ca_file && !http.ca_path && !http.cert_store
+        if !http.ca_file && !http.ca_path && !http.cert_store
           http.cert_store = OpenSSL::SSL::SSLContext::DEFAULT_CERT_STORE
         end
       end
@@ -252,8 +252,7 @@ module Saml
       # @return [String|nil] IdP NameIDFormat value if exists
       #
       def idp_name_id_format(name_id_priority : String? | Array(String) = nil)
-        nodes = REXML::XPath.match(
-          @idpsso_descriptor,
+        nodes = @idpsso_descriptor.xpath_nodes(
           "md:NameIDFormat",
           SamlMetadata::NAMESPACE
         )
@@ -264,8 +263,7 @@ module Saml
       # @return [String|nil] SingleSignOnService binding if exists
       #
       def single_signon_service_binding(binding_priority = nil)
-        nodes = REXML::XPath.match(
-          @idpsso_descriptor,
+        nodes = @idpsso_descriptor.xpath_nodes(
           "md:SingleSignOnService/@Binding",
           SamlMetadata::NAMESPACE
         )
@@ -276,8 +274,7 @@ module Saml
       # @return [String|nil] SingleLogoutService binding if exists
       #
       def single_logout_service_binding(binding_priority = nil)
-        nodes = REXML::XPath.match(
-          @idpsso_descriptor,
+        nodes = @idpsso_descriptor.xpath_nodes(
           "md:SingleLogoutService/@Binding",
           SamlMetadata::NAMESPACE
         )
@@ -291,8 +288,7 @@ module Saml
         binding = single_signon_service_binding(binding_priority)
         return if binding.nil?
 
-        node = REXML::XPath.first(
-          @idpsso_descriptor,
+        node = @idpsso_descriptor.xpath_node(
           "md:SingleSignOnService[@Binding=\"#{binding}\"]/@Location",
           SamlMetadata::NAMESPACE
         )
@@ -306,8 +302,7 @@ module Saml
         binding = single_logout_service_binding(binding_priority)
         return if binding.nil?
 
-        node = REXML::XPath.first(
-          @idpsso_descriptor,
+        node = @idpsso_descriptor.xpath_node(
           "md:SingleLogoutService[@Binding=\"#{binding}\"]/@Location",
           SamlMetadata::NAMESPACE
         )
@@ -321,8 +316,7 @@ module Saml
         binding = single_logout_service_binding(binding_priority)
         return if binding.nil?
 
-        node = REXML::XPath.first(
-          @idpsso_descriptor,
+        node = @idpsso_descriptor.xpath_node(
           "md:SingleLogoutService[@Binding=\"#{binding}\"]/@ResponseLocation",
           SamlMetadata::NAMESPACE
         )
@@ -333,14 +327,12 @@ module Saml
       #
       def certificates
         @certificates ||= begin
-          signing_nodes = REXML::XPath.match(
-            @idpsso_descriptor,
+          signing_nodes = @idpsso_descriptor.xpath_nodes(
             "md:KeyDescriptor[not(contains(@use, 'encryption'))]/ds:KeyInfo/ds:X509Data/ds:X509Certificate",
             SamlMetadata::NAMESPACE
           )
 
-          encryption_nodes = REXML::XPath.match(
-            @idpsso_descriptor,
+          encryption_nodes = @idpsso_descriptor.xpath_nodes(
             "md:KeyDescriptor[not(contains(@use, 'signing'))]/ds:KeyInfo/ds:X509Data/ds:X509Certificate",
             SamlMetadata::NAMESPACE
           )
@@ -381,8 +373,7 @@ module Saml
       # @return [Array] the names of all SAML attributes if any exist
       #
       def attribute_names
-        nodes = REXML::XPath.match(
-          @idpsso_descriptor,
+        nodes = @idpsso_descriptor.xpath_nodes(
           "saml:Attribute/@Name",
           SamlMetadata::NAMESPACE
         )

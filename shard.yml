@@ -11,6 +11,11 @@ license: MIT
 description: |
   SAML 2.0 library for Crystal (port of ruby-saml)
 
+dependencies:
+  openssl_ext:
+    github: spider-gazelle/openssl_ext
+    commit: 97b818d
+
 development_dependencies:
   timecop:
     github: crystal-community/timecop.cr

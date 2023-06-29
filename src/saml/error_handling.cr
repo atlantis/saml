@@ -8,6 +8,7 @@ module Saml
     def append_error(error_msg : String, soft_override : Bool? = nil)
       @error_messages << error_msg
 
+      soft = self.responds_to?(:soft) ? self.soft : true
       unless soft_override.nil? ? soft : soft_override
         raise ValidationError.new(error_msg)
       end

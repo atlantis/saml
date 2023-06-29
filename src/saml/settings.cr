@@ -6,6 +6,55 @@ module Saml
   class Settings
     alias Value = String | Int32 | Bool
 
+    @single_logout_service_binding : String?
+
+    # IdP Data
+    property :idp_entity_id
+    setter :idp_sso_service_url
+    setter :idp_slo_service_url
+    property :idp_slo_response_service_url
+    property :idp_cert
+    property :idp_cert_fingerprint
+    property idp_cert_fingerprint_algorithm : String?
+    property :idp_cert_multi
+    property :idp_attribute_names
+    property :idp_name_qualifier
+    property :valid_until
+    # SP Data
+    setter :sp_entity_id
+    property assertion_consumer_service_url : String?
+    getter assertion_consumer_service_binding : String?
+    setter single_logout_service_url : String?
+    property sp_name_qualifier : String?
+    property :name_identifier_format
+    property :name_identifier_value
+    property :name_identifier_value_requested
+    property :sessionindex
+    property compress_request : Bool = true
+    property compress_response : Bool = true
+    property double_quote_xml_attribute_values : Bool = true
+    property message_max_bytesize : Int32 = 250000
+    property :passive
+    getter :protocol_binding
+    property :attributes_index
+    property :force_authn
+    property :certificate
+    property :certificate_new
+    property private_key : String?
+    property :authn_context
+    property :authn_context_comparison
+    property :authn_context_decl_ref
+    getter :attribute_consuming_service
+    # Work-flow
+    property security = {} of Symbol => Value
+    property soft : Bool = true
+    # Deprecated
+    property :assertion_consumer_logout_service_url
+    getter :assertion_consumer_logout_service_binding
+    property :issuer
+    property :idp_sso_target_url
+    property :idp_slo_target_url
+
     DEFAULTS = {
       :assertion_consumer_service_binding => Utils::BINDINGS[:post],
       :single_logout_service_binding => Utils::BINDINGS[:redirect],
@@ -35,9 +84,11 @@ module Saml
 
     def initialize(overrides = {} of Symbol => Value | Hash(Symbol, Value), keep_security_attributes = false)
       if keep_security_attributes
-        security_attributes = overrides.delete(:security) || {} of Symbol => String
+        security_attributes = overrides.delete(:security).as?(Hash(Symbol, Value)) || {} of Symbol => Value
         config = DEFAULTS.merge(overrides)
-        config[:security] = DEFAULTS[:security].merge(security_attributes)
+        if security_defaults = DEFAULTS[:security].as?( Hash(Symbol, Value) )
+          config[:security] = security_defaults.merge(security_attributes)
+        end
       else
         config = DEFAULTS.merge(overrides)
       end
@@ -46,74 +97,25 @@ module Saml
         # TODO: replace with slick macro
         case k
         when :assertion_consumer_service_binding
-          self.assertion_consumer_service_binding = v
+          self.assertion_consumer_service_binding = v.as?(String)
         when :single_logout_service_binding
-          self.single_logout_service_binding = v
+          self.single_logout_service_binding = v.as?(String)
         when :idp_cert_fingerprint_algorithm
-          self.idp_cert_fingerprint_algorithm = v
+          self.idp_cert_fingerprint_algorithm = v.as?(String)
         when :compress_request
-          self.compress_request = v
+          self.compress_request = v.as(Bool)
         when :compress_response
-          self.compress_response = v
+          self.compress_response = v.as(Bool)
         when :message_max_bytesize
-          self.message_max_bytesize = v
+          self.message_max_bytesize = v.as(Int32)
         when :soft
-          self.soft = v
+          self.soft = v.as(Bool)
         when :double_quote_xml_attribute_values
-          self.double_quote_xml_attribute_values = v
-        when :security
-          self.security = v
+          self.double_quote_xml_attribute_values = v.as(Bool)
         end
       end
       @attribute_consuming_service = AttributeService.new
     end
-
-    # IdP Data
-    property :idp_entity_id
-    setter :idp_sso_service_url
-    setter :idp_slo_service_url
-    property :idp_slo_response_service_url
-    property :idp_cert
-    property :idp_cert_fingerprint
-    property :idp_cert_fingerprint_algorithm
-    property :idp_cert_multi
-    property :idp_attribute_names
-    property :idp_name_qualifier
-    property :valid_until
-    # SP Data
-    setter :sp_entity_id
-    property :assertion_consumer_service_url
-    getter :assertion_consumer_service_binding
-    setter :single_logout_service_url
-    property :sp_name_qualifier
-    property :name_identifier_format
-    property :name_identifier_value
-    property :name_identifier_value_requested
-    property :sessionindex
-    property :compress_request
-    property :compress_response
-    property :double_quote_xml_attribute_values
-    property :message_max_bytesize
-    property :passive
-    getter :protocol_binding
-    property :attributes_index
-    property :force_authn
-    property :certificate
-    property :certificate_new
-    property :private_key
-    property :authn_context
-    property :authn_context_comparison
-    property :authn_context_decl_ref
-    getter :attribute_consuming_service
-    # Work-flow
-    property :security
-    property :soft
-    # Deprecated
-    property :assertion_consumer_logout_service_url
-    getter :assertion_consumer_logout_service_binding
-    property :issuer
-    property :idp_sso_target_url
-    property :idp_slo_target_url
 
     # @return [String] IdP Single Sign On Service URL
     #
@@ -276,20 +278,27 @@ module Saml
     # @return [OpenSSL::PKey::RSA] Build the SP private from the settings (previously format it)
     #
     def get_sp_key
-      return nil if private_key.nil? || private_key.empty?
-
-      formatted_private_key = Saml::Utils.format_private_key(private_key)
-      OpenSSL::PKey::RSA.new(formatted_private_key)
+      if key = self.private_key
+        formatted_private_key = Saml::Utils.format_private_key(key)
+        OpenSSL::PKey::RSA.new(formatted_private_key)
+      end
     end
 
     def idp_binding_from_embed_sign
       security[:embed_sign] ? Utils::BINDINGS[:post] : Utils::BINDINGS[:redirect]
     end
 
-    def get_binding(value)
+    def get_binding(value) : String?
       return unless value
 
-      Utils::BINDINGS[value.to_sym] || value
+      case value
+      when :post, "post"
+        Utils::BINDINGS[:post]
+      when :redirect, "redirect"
+        Utils::BINDINGS[:redirect]
+      else
+        raise "Invalid binding: #{value}"
+      end
     end
   end
 end

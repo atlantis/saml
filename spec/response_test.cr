@@ -1547,8 +1547,7 @@ class RubySamlTest < Minitest::Test
         it "is not possible to decrypt the assertion if no private key" do
           response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, :settings => settings)
 
-          encrypted_assertion_node = REXML::XPath.first(
-            response.document,
+          encrypted_assertion_node = response.document.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
@@ -1563,15 +1562,13 @@ class RubySamlTest < Minitest::Test
         it "is possible to decrypt the assertion if private key" do
           response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, :settings => settings)
 
-          encrypted_assertion_node = REXML::XPath.first(
-            response.document,
+          encrypted_assertion_node = response.document.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           decrypted = response.send(:decrypt_assertion, encrypted_assertion_node)
 
-          encrypted_assertion_node2 = REXML::XPath.first(
-            decrypted,
+          encrypted_assertion_node2 = decrypted.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
@@ -1584,15 +1581,13 @@ class RubySamlTest < Minitest::Test
           resp = read_response("response_with_retrieval_method.xml")
           response = Saml::Response.new(resp, :settings => settings)
 
-          encrypted_assertion_node = REXML::XPath.first(
-            response.document,
+          encrypted_assertion_node = response.document.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           decrypted = response.send(:decrypt_assertion, encrypted_assertion_node)
 
-          encrypted_assertion_node2 = REXML::XPath.first(
-            decrypted,
+          encrypted_assertion_node2 = decrypted.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
@@ -1604,15 +1599,13 @@ class RubySamlTest < Minitest::Test
         it "is possible to decrypt the assertion if private key but no saml namespace on the Assertion Element that is inside the EncryptedAssertion" do
           unsigned_message_encrypted_assertion_without_saml_namespace = read_response("unsigned_message_encrypted_assertion_without_saml_namespace.xml.base64")
           response = Saml::Response.new(unsigned_message_encrypted_assertion_without_saml_namespace, :settings => settings)
-          encrypted_assertion_node = REXML::XPath.first(
-            response.document,
+          encrypted_assertion_node = response.document.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           decrypted = response.send(:decrypt_assertion, encrypted_assertion_node)
 
-          encrypted_assertion_node2 = REXML::XPath.first(
-            decrypted,
+          encrypted_assertion_node2 = decrypted.xpath_node(
             "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )

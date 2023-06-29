@@ -3,7 +3,7 @@ module Saml
   # SAML2 Auxiliary class
   #
   class Utils
-    @@uuid_generator = UUID.new if RUBY_VERSION < "1.9"
+    @@uuid_generator = UUID
 
     BINDINGS = { :post => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
                 :redirect => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" }
@@ -48,8 +48,6 @@ module Saml
     # @return [Integer] The new timestamp, after the duration is applied.
     #
     def self.parse_duration(duration, timestamp = Time.now.utc)
-      return nil if RUBY_VERSION < "1.9"  # 1.8.7 not supported
-
       matches = duration.match(DURATION_FORMAT)
 
       if matches.nil?
@@ -109,7 +107,7 @@ module Saml
       return key if key.nil? || key.empty? || key.match(/\x0d/)
 
       # is this an rsa key?
-      rsa_key = key.match("RSA PRIVATE KEY")
+      rsa_key = key.includes?("RSA PRIVATE KEY")
       key = key.gsub(/\-{5}\s?(BEGIN|END)( RSA)? PRIVATE KEY\s?\-{5}/, "")
       key = key.gsub(/\n/, "")
       key = key.gsub(/\r/, "")
@@ -229,60 +227,69 @@ module Saml
     end
 
     # Obtains the decrypted string from an Encrypted node element in XML
-    # @param encrypted_node [REXML::Element]     The Encrypted element
+    # @param encrypted_node [XML::Node]     The Encrypted element
     # @param private_key    [OpenSSL::PKey::RSA] The Service provider private key
     # @return [String] The decrypted data
-    def self.decrypt_data(encrypted_node, private_key)
-      encrypt_data = REXML::XPath.first(
-        encrypted_node,
-        "./xenc:EncryptedData",
-        { "xenc" => XENC }
-      )
-      symmetric_key = retrieve_symmetric_key(encrypt_data, private_key)
-      cipher_value = REXML::XPath.first(
-        encrypt_data,
-        "./xenc:CipherData/xenc:CipherValue",
-        { "xenc" => XENC }
-      )
-      node = Base64.decode(element_text(cipher_value))
-      encrypt_method = REXML::XPath.first(
-        encrypt_data,
-        "./xenc:EncryptionMethod",
-        { "xenc" => XENC }
-      )
-      algorithm = encrypt_method.attributes["Algorithm"]
-      retrieve_plaintext(node, symmetric_key, algorithm)
+    def self.decrypt_data(encrypted_node : XML::Node, private_key)
+      if encrypt_data = encrypted_node.xpath_node(
+          "./xenc:EncryptedData",
+          { "xenc" => XENC }
+        )
+        symmetric_key = retrieve_symmetric_key(encrypt_data, private_key)
+        if cipher_value = encrypt_data.xpath_node(
+            "./xenc:CipherData/xenc:CipherValue",
+            { "xenc" => XENC }
+          )
+          if et = element_text(cipher_value)
+            node = Base64.decode_string(et)
+            if encrypt_method = encrypt_data.xpath_node(
+                "./xenc:EncryptionMethod",
+                { "xenc" => XENC }
+              )
+              algorithm = encrypt_method["Algorithm"]
+              return retrieve_plaintext(node, symmetric_key, algorithm)
+            end
+          end
+        end
+
+        nil
+      end
     end
 
     # Obtains the symmetric key from the EncryptedData element
-    # @param encrypt_data [REXML::Element]     The EncryptedData element
+    # @param encrypt_data [XML::Node]     The EncryptedData element
     # @param private_key [OpenSSL::PKey::RSA] The Service provider private key
     # @return [String] The symmetric key
-    def self.retrieve_symmetric_key(encrypt_data, private_key)
-      encrypted_key = REXML::XPath.first(
-        encrypt_data,
-        "./ds:KeyInfo/xenc:EncryptedKey | ./KeyInfo/xenc:EncryptedKey | //xenc:EncryptedKey[@Id=$id]",
-        { "ds" => DSIG, "xenc" => XENC },
-        { "id" => self.retrieve_symetric_key_reference(encrypt_data) }
-      )
+    def self.retrieve_symmetric_key(encrypt_data : XML::Node, private_key)
+      if encrypted_key = encrypt_data.xpath_node(
+          "./ds:KeyInfo/xenc:EncryptedKey | ./KeyInfo/xenc:EncryptedKey | //xenc:EncryptedKey[@Id=$id]",
+          { "ds" => DSIG, "xenc" => XENC },
+          { "id" => self.retrieve_symetric_key_reference(encrypt_data) }
+        )
 
-      encrypted_symmetric_key_element = encrypted_key.xpath_node(
-        "./xenc:CipherData/xenc:CipherValue",
-        {"xenc" => XENC}
-      )
+        encrypted_symmetric_key_element = encrypted_key.xpath_node(
+          "./xenc:CipherData/xenc:CipherValue",
+          {"xenc" => XENC}
+        )
 
-      cipher_text = Base64.decode(element_text(encrypted_symmetric_key_element))
+        if et = element_text(encrypted_symmetric_key_element)
+          cipher_text = Base64.decode_string(et)
 
-      encrypt_method = encrypted_key.xpath_node(
-        "./xenc:EncryptionMethod",
-        {"xenc" => XENC},
-      )
+          if encrypt_method = encrypted_key.xpath_node(
+              "./xenc:EncryptionMethod",
+              {"xenc" => XENC},
+            )
 
-      algorithm = encrypt_method.attributes["Algorithm"]
-      retrieve_plaintext(cipher_text, private_key, algorithm)
+            algorithm = encrypt_method.attributes["Algorithm"]
+            return retrieve_plaintext(cipher_text, private_key, algorithm)
+          end
+        end
+      end
+
+      nil
     end
 
-    def self.retrieve_symetric_key_reference(encrypt_data)
+    def self.retrieve_symetric_key_reference(encrypt_data : XML::Node)
       encrypt_data.xpath_node(
         "substring-after(./ds:KeyInfo/ds:RetrievalMethod/@URI, '#')",
         { "ds" => DSIG }
@@ -294,16 +301,22 @@ module Saml
     # @param symmetric_key [String] The symetric key used to encrypt the text
     # @param algorithm [String]     The encrypted algorithm
     # @return [String] The deciphered text
-    def self.retrieve_plaintext(cipher_text, symmetric_key, algorithm)
+    def self.retrieve_plaintext(cipher_text, symmetric_key : OpenSSL::PKey::RSA | String | Nil, algorithm)
       case algorithm
       when "http://www.w3.org/2001/04/xmlenc#tripledes-cbc" then cipher = OpenSSL::Cipher.new("DES-EDE3-CBC").decrypt
       when "http://www.w3.org/2001/04/xmlenc#aes128-cbc" then cipher = OpenSSL::Cipher.new("AES-128-CBC").decrypt
       when "http://www.w3.org/2001/04/xmlenc#aes192-cbc" then cipher = OpenSSL::Cipher.new("AES-192-CBC").decrypt
       when "http://www.w3.org/2001/04/xmlenc#aes256-cbc" then cipher = OpenSSL::Cipher.new("AES-256-CBC").decrypt
-      when "http://www.w3.org/2009/xmlenc11#aes128-gcm" then auth_cipher = OpenSSL::Cipher::AES.new(128, :GCM).decrypt
-      when "http://www.w3.org/2009/xmlenc11#aes192-gcm" then auth_cipher = OpenSSL::Cipher::AES.new(192, :GCM).decrypt
-      when "http://www.w3.org/2009/xmlenc11#aes256-gcm" then auth_cipher = OpenSSL::Cipher::AES.new(256, :GCM).decrypt
-      when "http://www.w3.org/2001/04/xmlenc#rsa-1_5" then rsa = symmetric_key
+      when "http://www.w3.org/2009/xmlenc11#aes128-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-128-GCM").decrypt
+      when "http://www.w3.org/2009/xmlenc11#aes192-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-192-GCM").decrypt
+      when "http://www.w3.org/2009/xmlenc11#aes256-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-256-GCM").decrypt
+      when "http://www.w3.org/2001/04/xmlenc#rsa-1_5"
+        case symmetric_key
+        when OpenSSL::PKey::RSA
+          rsa = symmetric_key
+        when String
+          rsa = OpenSSL::PKey::RSA.new(symmetric_key)
+        end
       when "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p" then oaep = symmetric_key
       end
 
@@ -324,9 +337,9 @@ module Saml
         assertion_plaintext = auth_cipher.update(data)
         assertion_plaintext << auth_cipher.final
       elsif rsa
-        rsa.private_decrypt(cipher_text)
-      elsif oaep
-        oaep.private_decrypt(cipher_text, OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING)
+        rsa.private_decrypt(cipher_text).try(&.to_s)
+      elsif oaep.is_a?(OpenSSL::PKey::RSA)
+        oaep.private_decrypt(cipher_text, LibCrypto::Padding::PKCS1_OAEP_PADDING).try(&.to_s)
       else
         cipher_text
       end

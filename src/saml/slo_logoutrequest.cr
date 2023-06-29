@@ -62,24 +62,28 @@ module Saml
     #
     def name_id
       @name_id ||= begin
-        node = REXML::XPath.first(document, "/p:LogoutRequest/a:NameID", { "p" => PROTOCOL, "a" => ASSERTION })
+        node = document.xpath_node("/p:LogoutRequest/a:NameID", { "p" => PROTOCOL, "a" => ASSERTION })
         Utils.element_text(node)
       end
     end
 
-    alias_method :nameid, :name_id
+    def nameid
+      self.name_id
+    end
 
     # @return [String] Gets the NameID Format of the Logout Request.
     #
     def name_id_format
-      @name_id_node ||= REXML::XPath.first(document, "/p:LogoutRequest/a:NameID", { "p" => PROTOCOL, "a" => ASSERTION })
+      @name_id_node ||= document.xpath_node("/p:LogoutRequest/a:NameID", { "p" => PROTOCOL, "a" => ASSERTION })
       @name_id_format ||=
         if @name_id_node && @name_id_node.attribute("Format")
           @name_id_node.attribute("Format").value
         end
     end
 
-    alias_method :nameid_format, :name_id_format
+    def nameid_format
+      self.name_id_format
+    end
 
     # @return [String|nil] Gets the ID attribute from the Logout Request. if exists.
     #
@@ -91,8 +95,7 @@ module Saml
     #
     def issuer
       @issuer ||= begin
-        node = REXML::XPath.first(
-          document,
+        node = document.xpath_node(
           "/p:LogoutRequest/a:Issuer",
           { "p" => PROTOCOL, "a" => ASSERTION }
         )
@@ -104,8 +107,7 @@ module Saml
     #
     def not_on_or_after
       @not_on_or_after ||= begin
-        node = REXML::XPath.first(
-          document,
+        node = document.xpath_node(
           "/p:LogoutRequest",
           { "p" => PROTOCOL }
         )
@@ -118,8 +120,7 @@ module Saml
     # @return [Array] Gets the SessionIndex if exists (Supported multiple values). Empty Array if none found
     #
     def session_indexes
-      nodes = REXML::XPath.match(
-        document,
+      nodes = document.xpath_nodes(
         "/p:LogoutRequest/p:SessionIndex",
         { "p" => PROTOCOL }
       )

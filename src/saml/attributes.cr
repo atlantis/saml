@@ -72,7 +72,9 @@ module Saml
       attributes[canonize_name(name)] = values
     end
 
-    alias_method :[]=, :set
+    def []=(name, values)
+      self.set(name, values)
+    end
 
     # @param name [String] The attribute name
     # @param values [Array] The values

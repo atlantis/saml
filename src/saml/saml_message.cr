@@ -74,7 +74,7 @@ module Saml
     # @param saml [String] The deflated and encoded SAML Message
     # @return [String] The plain SAML Message
     #
-    private def decode_raw_saml(saml, settings = nil)
+    private def decode_raw_saml(saml : String, settings = nil) : String
       return saml unless base64_encoded?(saml)
 
       settings = Saml::Settings.new if settings.nil?
@@ -106,7 +106,7 @@ module Saml
     # @return [String] The decoded string
     #
     private def decode(string)
-      Base64.decode(string)
+      Base64.decode_string(string)
     end
 
     # Base 64 encode method
@@ -130,7 +130,9 @@ module Saml
     # @return [String] The inflated string
     #
     private def inflate(deflated)
-      Zlib::Inflate.new(-Zlib::MAX_WBITS).inflate(deflated)
+      Compress::Zlib::Reader.open(IO::Memory.new(deflated)) do |reader|
+        reader.gets_to_end
+      end
     end
 
     # Deflate method
@@ -138,7 +140,7 @@ module Saml
     # @return [String] The deflated string
     #
     private def deflate(inflated)
-      Zlib::Deflate.deflate(inflated, 9)[2..-5]
+      Compress::Zlib::Deflate.deflate(inflated, 9)[2..-5]
     end
   end
 end
