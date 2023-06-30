@@ -31,17 +31,22 @@ end
 module OpenSSL::X509
   class Certificate
     def not_before : Time?
-      buffer = LibCrypto::Bio.new
-      LibCrypto.asn1_time_print( buffer.to_unsafe, LibCrypto.x509_get_notbefore(self) )
-      puts "TIME: #{buffer.to_s}"
-      Time.parse_utc(buffer.to_s, "MMM DD HH:MM:SS YYYY")
+      if timestamp  = LibCrypto.x509_get_notbefore(self)
+        buffer = LibCrypto::Bio.new
+        LibCrypto.asn1_time_print( buffer.to_unsafe, timestamp )
+        puts "TIME not_before: #{buffer.to_s}"
+        Time.parse_utc(buffer.to_s, "MMM DD HH:MM:SS YYYY")
+      end
+
     end
 
     def not_after : Time?
-      buffer = LibCrypto::Bio.new
-      LibCrypto.asn1_time_print( buffer, LibCrypto.x509_get_notafter(self) )
-      puts "TIME: #{buffer.to_s}"
-      Time.parse_utc(buffer.to_s, "MMM DD HH:MM:SS YYYY")
+      if timestamp = LibCrypto.x509_get_notafter(self)
+        buffer = LibCrypto::Bio.new
+        LibCrypto.asn1_time_print( buffer, timestamp )
+        puts "TIME not_after: #{buffer.to_s}"
+        Time.parse_utc(buffer.to_s, "MMM DD HH:MM:SS YYYY")
+      end
     end
   end
 end
