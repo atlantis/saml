@@ -9,7 +9,7 @@ module Saml
     @single_logout_service_binding : String?
 
     # IdP Data
-    property :idp_entity_id
+    property idp_entity_id : String?
     setter idp_sso_service_url : String?
     setter idp_slo_service_url : String?
     property idp_slo_response_service_url : String?
@@ -51,7 +51,7 @@ module Saml
     # Deprecated
     property :assertion_consumer_logout_service_url
     getter :assertion_consumer_logout_service_binding
-    property :issuer
+    property issuer : String?
     property :idp_sso_target_url
     property :idp_slo_target_url
 
@@ -211,10 +211,12 @@ module Saml
     #
     def get_fingerprint
       idp_cert_fingerprint || begin
-        idp_cert = get_idp_cert
-        if idp_cert
-          fingerprint_alg = XMLSecurity::BaseDocument.algorithm(idp_cert_fingerprint_algorithm)
-          fingerprint_alg.hexdigest(idp_cert.to_der).upcase.scan(/../).join(":")
+        if idp_cert = get_idp_cert
+          if algo = idp_cert_fingerprint_algorithm
+            fingerprint_alg = XMLSecurity::BaseDocument.algorithm(algo)
+            fingerprint_alg << idp_cert.public_key.to_der
+            fingerprint_alg.hexfinal.upcase.scan(/../).join(":")
+          end
         end
       end
     end
@@ -222,7 +224,7 @@ module Saml
     # @return [OpenSSL::X509::Certificate|nil] Build the IdP certificate from the settings (previously format it)
     #
     def get_idp_cert
-      return nil if idp_cert.nil? || idp_cert.empty?
+      return nil if idp_cert.nil? || idp_cert.not_nil!.empty?
 
       formatted_cert = Saml::Utils.format_cert(idp_cert.not_nil!)
       OpenSSL::X509::Certificate.new(formatted_cert)
@@ -235,7 +237,7 @@ module Saml
 
       raise ArgumentError.new("Invalid value for idp_cert_multi") if !idp_cert_multi.is_a?(Hash)
 
-      certs = { :signing => [] of String, :encryption => [] of String }
+      certs = { :signing => [] of OpenSSL::X509::Certificate, :encryption => [] of OpenSSL::X509::Certificate }
 
       [:signing, :encryption].each do |type|
         certs_for_type = idp_cert_multi[type] || idp_cert_multi[type.to_s]

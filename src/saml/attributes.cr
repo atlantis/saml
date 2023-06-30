@@ -3,7 +3,7 @@ module Saml
   # SAML2 Attributes. Parse the Attributes from the AttributeStatement of the SAML Response.
   #
   class Attributes
-    alias AttributeValue = String | Int32 | Bool
+    alias AttributeValue = String | Int32 | Bool | Nil
     include Enumerable(AttributeValue)
 
     getter :attributes
@@ -14,7 +14,7 @@ module Saml
     #      'mail' => ['value1'],
     #    })
     #
-    def initialize(attrs : Hash(String, Array(AttributeValue)))
+    def initialize(attrs = {} of String => Array(AttributeValue))
       @attributes = attrs
     end
 

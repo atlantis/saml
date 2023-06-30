@@ -31,7 +31,7 @@ module XMLSecurity
     def canon_algorithm(element)
       if algorithm = element
         if algorithm.is_a?(XML::Node)
-          algorithm = element["Algorithm"]
+          algorithm = element["Algorithm"]?
         end
 
         case algorithm
@@ -50,7 +50,7 @@ module XMLSecurity
     def self.algorithm(element : XML::Node | String)
       if algorithm = element
         if algorithm.is_a?(XML::Node)
-          algorithm = element["Algorithm"]
+          algorithm = element["Algorithm"]?
         end
 
         algorithm = algorithm =~ /(rsa-)?sha(.*?)$/i && $2.to_i

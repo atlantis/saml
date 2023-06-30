@@ -825,7 +825,7 @@ class RubySamlTest < Minitest::Test
         response_with_skip = Saml::Response.new(response_document_valid_signed, opts)
         response_with_skip.settings = settings
         response_with_skip.settings.assertion_consumer_service_url = "recipient"
-        Time.expects(:now).times(0) # ensures the test isn't run and thus Time.now.utc is never called within the test
+        Time.expects(:now).times(0) # ensures the test isn't run and thus Time.utc is never called within the test
         assert response_with_skip.send(:validate_subject_confirmation)
         assert_empty response_with_skip.errors
       end
@@ -835,7 +835,7 @@ class RubySamlTest < Minitest::Test
         opts[:skip_subject_confirmation] = true
         response_with_skip = Saml::Response.new(read_invalid_response("invalid_subjectconfirmation_noa.xml.base64"), opts)
         response_with_skip.settings = settings
-        Time.expects(:now).times(0) # ensures the test isn't run and thus Time.now.utc is never called within the test
+        Time.expects(:now).times(0) # ensures the test isn't run and thus Time.utc is never called within the test
         assert response_with_skip.send(:validate_subject_confirmation)
         assert_empty response_with_skip.errors
       end

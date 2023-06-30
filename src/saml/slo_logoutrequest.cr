@@ -191,7 +191,7 @@ module Saml
     # @raise [ValidationError] if soft == false and validation fails
     #
     private def validate_not_on_or_after
-      now = Time.now.utc
+      now = Time.utc
 
       if not_on_or_after && now >= (not_on_or_after + allowed_clock_drift)
         return append_error("Current time is on or after NotOnOrAfter (#{now} >= #{not_on_or_after}#{" + #{allowed_clock_drift.ceil}s" if allowed_clock_drift > 0})")
@@ -230,7 +230,7 @@ module Saml
     private def validate_issuer
       return true if settings.nil? || settings.idp_entity_id.nil? || issuer.nil?
 
-      unless Saml::Utils.uri_match?(issuer, settings.idp_entity_id)
+      unless Saml::Utils.uri_match?(issuer, settings.idp_entity_id.not_nil!)
         return append_error("Doesn't match the issuer, expected: <#{settings.idp_entity_id}>, but was: <#{issuer}>")
       end
 

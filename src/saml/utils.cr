@@ -35,7 +35,7 @@ module Saml
         cert = OpenSSL::X509::Certificate.new(cert)
       end
 
-      return cert.not_after < Time.now
+      return cert.not_nil!.not_after < Time.utc
     end
 
     # Interprets a ISO8601 duration value relative to a given timestamp.
@@ -47,7 +47,7 @@ module Saml
     #
     # @return [Integer] The new timestamp, after the duration is applied.
     #
-    def self.parse_duration(duration, timestamp = Time.now.utc)
+    def self.parse_duration(duration, timestamp = Time.utc)
       matches = duration.match(DURATION_FORMAT)
 
       if matches.nil?
@@ -75,15 +75,15 @@ module Saml
     def self.format_cert(cert)
       # don't try to format an encoded certificate or if is empty or nil
       if cert.responds_to?(:ascii_only?)
-        return cert if cert.nil? || cert.empty? || !cert.ascii_only?
+        return cert if cert.nil? || cert.not_nil!.empty? || !cert.not_nil!.ascii_only?
       else
-        return cert if cert.nil? || cert.empty? || cert.match(/\x0d/)
+        return cert if cert.nil? || cert.not_nil!.empty? || cert.not_nil!.match(/\x0d/)
       end
 
       if cert.scan(/BEGIN CERTIFICATE/).size > 1
         formatted_cert = [] of String
         cert.scan(/-{5}BEGIN CERTIFICATE-{5}[\n\r]?.*?-{5}END CERTIFICATE-{5}[\n\r]?/m) { |c|
-          formatted_cert << format_cert(c)
+          formatted_cert << format_cert(c.string)
         }
         formatted_cert.join("\n")
       else
@@ -163,16 +163,16 @@ module Saml
     def self.prepare_raw_get_params(rawparams, params, lowercase_url_encoding = false)
       rawparams ||= {} of String => String
 
-      if rawparams["SAMLRequest"].nil? && !params["SAMLRequest"].nil?
+      if rawparams["SAMLRequest"]?.nil? && !params["SAMLRequest"]?.nil?
         rawparams["SAMLRequest"] = escape_request_param(params["SAMLRequest"], lowercase_url_encoding)
       end
-      if rawparams["SAMLResponse"].nil? && !params["SAMLResponse"].nil?
+      if rawparams["SAMLResponse"]?.nil? && !params["SAMLResponse"]?.nil?
         rawparams["SAMLResponse"] = escape_request_param(params["SAMLResponse"], lowercase_url_encoding)
       end
-      if rawparams["RelayState"].nil? && !params["RelayState"].nil?
+      if rawparams["RelayState"]?.nil? && !params["RelayState"]?.nil?
         rawparams["RelayState"] = escape_request_param(params["RelayState"], lowercase_url_encoding)
       end
-      if rawparams["SigAlg"].nil? && !params["SigAlg"].nil?
+      if rawparams["SigAlg"]?.nil? && !params["SigAlg"]?.nil?
         rawparams["SigAlg"] = escape_request_param(params["SigAlg"], lowercase_url_encoding)
       end
 
@@ -353,24 +353,24 @@ module Saml
       "#{UUID_PREFIX}" + (RUBY_VERSION < "1.9" ? "#{@@uuid_generator.generate}" : "#{SecureRandom.uuid}")
     end
 
-    # Given two strings, attempt to match them as URIs using Rails' parse method.  If they can be parsed,
+    # Given two strings, attempt to match them as URIs using URL parse method.  If they can be parsed,
     # then the fully-qualified domain name and the host should performa a case-insensitive match, per the
-    # RFC for URIs.  If Rails can not parse the string in to URL pieces, return a boolean match of the
+    # RFC for URIs.  If URL can not parse the string in to URL pieces, return a boolean match of the
     # two strings.  This maintains the previous functionality.
     # @return [Boolean]
-    def self.uri_match?(destination_url, settings_url)
+    def self.uri_match?(destination_url : String, settings_url : String)
       dest_uri = URI.parse(destination_url)
       acs_uri = URI.parse(settings_url)
 
       if dest_uri.scheme.nil? || acs_uri.scheme.nil? || dest_uri.host.nil? || acs_uri.host.nil?
-        raise URI::InvalidURIError
+        raise URI::Error.new
       else
-        dest_uri.scheme.downcase == acs_uri.scheme.downcase &&
-          dest_uri.host.downcase == acs_uri.host.downcase &&
+        dest_uri.scheme.not_nil!.downcase == acs_uri.scheme.not_nil!.downcase &&
+          dest_uri.host.not_nil!.downcase == acs_uri.host.not_nil!.downcase &&
           dest_uri.path == acs_uri.path &&
           dest_uri.query == acs_uri.query
       end
-    rescue URI::InvalidURIError
+    rescue : URI::Error
       original_uri_match?(destination_url, settings_url)
     end
 

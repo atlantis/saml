@@ -67,7 +67,11 @@ module Saml
           "/p:LogoutResponse",
           { "p" => PROTOCOL }
         )
-        node.nil? ? nil : node.attributes["InResponseTo"]
+        if n = node
+          n["InResponseTo"]?
+        else
+          nil
+        end
       end
     end
 
@@ -197,7 +201,7 @@ module Saml
     private def valid_issuer?
       return true if settings.idp_entity_id.nil? || issuer.nil?
 
-      unless Saml::Utils.uri_match?(issuer, settings.idp_entity_id)
+      unless Saml::Utils.uri_match?(issuer, settings.idp_entity_id.not_nil!)
         return append_error("Doesn't match the issuer, expected: <#{settings.idp_entity_id}>, but was: <#{issuer}>")
       end
       true

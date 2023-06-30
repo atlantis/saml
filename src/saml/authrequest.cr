@@ -93,7 +93,7 @@ module Saml
     end
 
     def create_xml_document(settings)
-      time = Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+      time = Time.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
       request_doc = XMLSecurity::Document.new
       request_doc.uuid = uuid
