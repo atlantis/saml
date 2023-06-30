@@ -97,37 +97,37 @@ module Saml
     end
 
     def create_xml_document(settings)
-      time = Time.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+      time = Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ")
 
-      request_doc = XMLSecurity::Document.new
+      request_doc = XMLSecurity::Document.new("")
       request_doc.uuid = uuid
 
       root = request_doc.add_element "samlp:LogoutRequest", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" }
-      root.attributes["ID"] = uuid
-      root.attributes["IssueInstant"] = time
-      root.attributes["Version"] = "2.0"
-      root.attributes["Destination"] = settings.idp_slo_service_url unless settings.idp_slo_service_url.nil? || settings.idp_slo_service_url.empty?
+      root["ID"] = uuid
+      root["IssueInstant"] = time
+      root["Version"] = "2.0"
+      root["Destination"] = settings.idp_slo_service_url if settings.idp_slo_service_url.presence
 
-      if settings.sp_entity_id
+      if sp_entity_id = settings.sp_entity_id
         issuer = root.add_element "saml:Issuer"
-        issuer.text = settings.sp_entity_id
+        issuer.text = sp_entity_id
       end
 
       nameid = root.add_element "saml:NameID"
-      if settings.name_identifier_value
-        nameid.attributes["NameQualifier"] = settings.idp_name_qualifier if settings.idp_name_qualifier
-        nameid.attributes["SPNameQualifier"] = settings.sp_name_qualifier if settings.sp_name_qualifier
-        nameid.attributes["Format"] = settings.name_identifier_format if settings.name_identifier_format
-        nameid.text = settings.name_identifier_value
+      if name_identifier_value = settings.name_identifier_value
+        nameid["NameQualifier"] = settings.idp_name_qualifier if settings.idp_name_qualifier
+        nameid["SPNameQualifier"] = settings.sp_name_qualifier if settings.sp_name_qualifier
+        nameid["Format"] = settings.name_identifier_format if settings.name_identifier_format
+        nameid.text = name_identifier_value
       else
         # If no NameID is present in the settings we generate one
         nameid.text = Saml::Utils.uuid
-        nameid.attributes["Format"] = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+        nameid["Format"] = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
       end
 
-      if settings.sessionindex
-        sessionindex = root.add_element "samlp:SessionIndex"
-        sessionindex.text = settings.sessionindex
+      if sessionindex = settings.sessionindex
+        sessionindex_element = root.add_element "samlp:SessionIndex"
+        sessionindex_element.text = sessionindex
       end
 
       request_doc
@@ -136,9 +136,15 @@ module Saml
     def sign_document(document, settings)
       # embed signature
       if settings.idp_slo_service_binding == Utils::BINDINGS[:post] && settings.security[:logout_requests_signed] && settings.private_key && settings.certificate
-        private_key = settings.get_sp_key
-        cert = settings.get_sp_cert
-        document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+        if private_key = settings.get_sp_key
+          if cert = settings.get_sp_cert
+            document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+          else
+            raise "No cert"
+          end
+        else
+          raise "No private key"
+        end
       end
 
       document

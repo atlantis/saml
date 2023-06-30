@@ -28,7 +28,7 @@ module XMLSecurity
     DSIG = "http://www.w3.org/2000/09/xmldsig#"
     XML_PARSER_OPTIONS = XML::ParserOptions::RECOVER | XML::ParserOptions::NOERROR | XML::ParserOptions::NOWARNING | XML::ParserOptions::NONET
 
-    def canon_algorithm(element)
+    def self.canon_algorithm(element)
       if algorithm = element
         if algorithm.is_a?(XML::Node)
           algorithm = element["Algorithm"]?
@@ -64,6 +64,8 @@ module XMLSecurity
         Digest::SHA1.new
       end
     end
+
+
   end
 
   class Document < BaseDocument
@@ -82,9 +84,15 @@ module XMLSecurity
 
     @uuid : String?
 
+    def initialize(xml = "")
+      super(XML.parse(xml, XML_PARSER_OPTIONS).to_unsafe)
+    end
+
     def uuid
       @uuid ||= begin
-        document.root.nil? ? nil : document.root.attributes["ID"]
+        if root = document.root
+          root["ID"]?
+        end
       end
     end
 
@@ -103,23 +111,24 @@ module XMLSecurity
     #<KeyInfo />
     #<Object />
     #</Signature>
-    def sign_document(private_key, certificate, signature_method = RSA_SHA1, digest_method = SHA1)
+    def sign_document(private_key : OpenSSL::PKey::RSA, certificate : OpenSSL::X509::Certificate | String | Nil, signature_method = RSA_SHA1, digest_method = SHA1)
       noko = XML.parse(self.to_s, XML_PARSER_OPTIONS)
 
       signature_element = XML.build_fragment do |xml|
-        xml.element("ds:Signature") do |signature_element|
-          signature_element.element("ds:SignedInfo") do |signed_info_element|
-            signature_element.element("ds:CanonicalizationMethod", { "Algorithm" => C14N })
-            signature_element.element("ds:SignatureMethod", { "Algorithm" => signature_method })
+        xml.element("ds", "Signature", DSIG, {} of String => String) do
+          xml.element("ds:SignedInfo") do
+            xml.element("ds:CanonicalizationMethod", { "Algorithm" => C14N })
+            xml.element("ds:SignatureMethod", { "Algorithm" => signature_method })
 
             # Add Reference
-            reference_element = signed_info_element.element("ds:Reference", { "URI" => "##{uuid}" })
+            xml.element("ds:Reference", { "URI" => "##{uuid}" }) do
+              xml.element("ds:DigestMethod", { "Algorithm" => digest_method })
 
-            digest_method_element = reference_element.element("ds:DigestMethod", { "Algorithm" => digest_method })
-            inclusive_namespaces = INC_PREFIX_LIST.split(" ")
-            canon_doc = noko.canonicalize(mode: canon_algorithm(C14N), inclusive_ns: inclusive_namespaces)
-            reference_element.element("ds:DigestValue") do |digest_value_element|
-              digest_value_element.text compute_digest(canon_doc, algorithm(digest_method))
+              inclusive_namespaces = INC_PREFIX_LIST.split(" ")
+              canon_doc = noko.canonicalize(mode: BaseDocument.canon_algorithm(C14N), inclusive_ns: inclusive_namespaces)
+              xml.element("ds:DigestValue") do
+                xml.text compute_digest(canon_doc, BaseDocument.algorithm(digest_method.to_s))
+              end
             end
           end
         end
@@ -131,10 +140,10 @@ module XMLSecurity
       # signed_info_element.add_element("ds:SignatureMethod", { "Algorithm" => signature_method })
 
       transforms_element = XML.build_fragment do |xml|
-        xml.element("ds:Transforms") do |transforms_element|
-          transforms_element.element("ds:Transform", { "Algorithm" => ENVELOPED_SIG })
-          transforms_element.element("ds:Transform", { "Algorithm" => C14N }) do |c14element|
-            c14element.element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
+        xml.element("ds:Transforms") do
+          xml.element("ds:Transform", { "Algorithm" => ENVELOPED_SIG })
+          xml.element("ds:Transform", { "Algorithm" => C14N }) do
+            xml.element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
           end
         end
       end
@@ -146,41 +155,49 @@ module XMLSecurity
       # c14element.add_element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
 
       # add SignatureValue
-      noko_sig_element = XML.Parse(signature_element, XML_PARSER_OPTIONS)
+      noko_sig_element = XML.parse(signature_element, XML_PARSER_OPTIONS)
 
-      noko_signed_info_element = noko_sig_element.at_xpath("//ds:Signature/ds:SignedInfo", {"ds" => DSIG})
-      canon_string = noko_signed_info_element.canonicalize(mode: canon_algorithm(C14N))
-
-      signature = compute_signature(private_key, algorithm(signature_method).new, canon_string)
-      signature_element.add_element("ds:SignatureValue").text = signature
-
-      # add KeyInfo
-      key_info_element = signature_element.add_element("ds:KeyInfo")
-      x509_element = key_info_element.add_element("ds:X509Data")
-      x509_cert_element = x509_element.add_element("ds:X509Certificate")
-      if certificate.is_a?(String)
-        certificate = OpenSSL::X509::Certificate.new(certificate)
-      end
-      x509_cert_element.text = Base64.encode(certificate.to_der).gsub(/\n/, "")
-
-      # add the signature
-      issuer_element = elements["//saml:Issuer"]
-      if issuer_element
-        root.insert_after(issuer_element, signature_element)
-      elsif first_child = root.children[0]
-        root.insert_before(first_child, signature_element)
+      cert_object = case certificate
+      when String
+        OpenSSL::X509::Certificate.new(certificate)
+      when OpenSSL::X509::Certificate
+        certificate
       else
-        root.add_element(signature_element)
+        raise "Missing certificate"
       end
+
+      if noko_signed_info_element = noko_sig_element.xpath_node("//ds:Signature/ds:SignedInfo", {"ds" => DSIG})
+        canon_string = noko_signed_info_element.canonicalize(mode: BaseDocument.canon_algorithm(C14N))
+        signature = compute_signature(private_key, BaseDocument.algorithm(signature_method.to_s), canon_string)
+        noko_signed_info_element.add_element("ds:SignatureValue").text = signature
+
+        # add KeyInfo
+        key_info_element = noko_signed_info_element.add_element("ds:KeyInfo")
+        x509_element = key_info_element.add_element("ds:X509Data")
+        x509_cert_element = x509_element.add_element("ds:X509Certificate")
+        x509_cert_element.text = Base64.strict_encode(cert_object.public_key.to_der)
+      else
+        raise "No SignedInfo element found in the signature"
+      end
+
+      # add the signature - TODO: see if it's important to insert it in these places
+      # if issuer_element = noko.xpath_node("//saml:Issuer")
+      #   root.insert_after(issuer_element, signature_element)
+      # elsif first_child = root.children[0]
+      #   root.insert_before(first_child, signature_element)
+      # else
+        self << XML.parse(signature_element)
+      # end
     end
 
-    protected def compute_signature(private_key, signature_algorithm, document)
-      Base64.encode(private_key.sign(signature_algorithm, document)).gsub(/\n/, "")
+    protected def compute_signature(private_key : OpenSSL::PKey::RSA, signature_algorithm, document)
+      Base64.strict_encode(private_key.sign(signature_algorithm, document))
     end
 
     protected def compute_digest(document, digest_algorithm)
-      digest = digest_algorithm.digest(document)
-      Base64.encode(digest).strip
+      digest = digest_algorithm
+      digest << document
+      Base64.strict_encode(digest.final)
     end
   end
 
@@ -312,7 +329,7 @@ module XMLSecurity
       end
 
       # canonicalization method
-      canon_algorithm = canon_algorithm sig_element.try(&.xpath_node(
+      canon_algorithm = BaseDocument.canon_algorithm sig_element.try(&.xpath_node(
         "./ds:SignedInfo/ds:CanonicalizationMethod",
         { "ds" => DSIG },
       ))
@@ -331,7 +348,7 @@ module XMLSecurity
 
       hashed_element = document.xpath_node("//*[@ID=$id]", nil, { "id" => extract_signed_element_id })
 
-      canon_algorithm = canon_algorithm ref.try(&.xpath_node(
+      canon_algorithm = BaseDocument.canon_algorithm ref.try(&.xpath_node(
         "//ds:CanonicalizationMethod",
         { "ds" => DSIG }
       ))
@@ -434,6 +451,11 @@ module XMLSecurity
       else
         [] of String
       end
+    end
+
+    # TODO: limit to just tests?
+    def extract_inclusive_namespaces_for_test
+      extract_inclusive_namespaces
     end
   end
 end

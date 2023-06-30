@@ -87,42 +87,42 @@ module Saml
     # @param settings [Saml::Settings|nil] Toolkit settings
     # @return [String] The SAMLRequest String.
     #
-    def create_authentication_xml_doc(settings)
+    def create_authentication_xml_doc(settings : Settings)
       document = create_xml_document(settings)
       sign_document(document, settings)
     end
 
     def create_xml_document(settings)
-      time = Time.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+      time = Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ")
 
-      request_doc = XMLSecurity::Document.new
+      request_doc = XMLSecurity::Document.new("")
       request_doc.uuid = uuid
 
       root = request_doc.add_element "samlp:AuthnRequest", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" }
-      root.attributes["ID"] = uuid
-      root.attributes["IssueInstant"] = time
-      root.attributes["Version"] = "2.0"
-      root.attributes["Destination"] = settings.idp_sso_service_url unless settings.idp_sso_service_url.nil? || settings.idp_sso_service_url.empty?
-      root.attributes["IsPassive"] = settings.passive unless settings.passive.nil?
-      root.attributes["ProtocolBinding"] = settings.protocol_binding unless settings.protocol_binding.nil?
-      root.attributes["AttributeConsumingServiceIndex"] = settings.attributes_index unless settings.attributes_index.nil?
-      root.attributes["ForceAuthn"] = settings.force_authn unless settings.force_authn.nil?
+      root["ID"] = uuid
+      root["IssueInstant"] = time
+      root["Version"] = "2.0"
+      root["Destination"] = settings.idp_sso_service_url if settings.idp_sso_service_url.presence
+      root["IsPassive"] = settings.passive unless settings.passive.nil?
+      root["ProtocolBinding"] = settings.protocol_binding unless settings.protocol_binding.nil?
+      root["AttributeConsumingServiceIndex"] = settings.attributes_index unless settings.attributes_index.nil?
+      root["ForceAuthn"] = settings.force_authn unless settings.force_authn.nil?
 
       # Conditionally defined elements based on settings
       if settings.assertion_consumer_service_url != nil
         root.attributes["AssertionConsumerServiceURL"] = settings.assertion_consumer_service_url
       end
-      if settings.sp_entity_id != nil
+      if sp_entity_id = settings.sp_entity_id
         issuer = root.add_element "saml:Issuer"
-        issuer.text = settings.sp_entity_id
+        issuer.text = sp_entity_id
       end
 
-      if settings.name_identifier_value_requested != nil
+      if name_identifier_value_requested = settings.name_identifier_value_requested
         subject = root.add_element "saml:Subject"
 
         nameid = subject.add_element "saml:NameID"
         nameid.attributes["Format"] = settings.name_identifier_format if settings.name_identifier_format
-        nameid.text = settings.name_identifier_value_requested
+        nameid.text = name_identifier_value_requested
 
         subject_confirmation = subject.add_element "saml:SubjectConfirmation"
         subject_confirmation.attributes["Method"] = "urn:oasis:names:tc:SAML:2.0:cm:bearer"
@@ -147,19 +147,28 @@ module Saml
           "Comparison" => comparison,
         }
 
-        if settings.authn_context != nil
-          authn_contexts_class_ref = settings.authn_context.is_a?(Array) ? settings.authn_context : [settings.authn_context]
-          authn_contexts_class_ref.each do |authn_context_class_ref|
-            class_ref = requested_context.add_element "saml:AuthnContextClassRef"
-            class_ref.text = authn_context_class_ref
+        authn_contexts_class_refs = case authn_context = settings.authn_context
+        when String
+          [authn_context]
+        when Array(String)
+          authn_context
+        end
+
+        if authn_contexts_class_refs
+          authn_contexts_class_refs.each do |authn_context_class_ref|
+            if class_ref = requested_context.add_element( "saml:AuthnContextClassRef" )
+              if val = authn_context_class_ref.as?(String)
+                class_ref.text = val
+              end
+            end
           end
         end
 
         if settings.authn_context_decl_ref != nil
-          authn_contexts_decl_refs = settings.authn_context_decl_ref.is_a?(Array) ? settings.authn_context_decl_ref : [settings.authn_context_decl_ref]
+          authn_contexts_decl_refs = settings.authn_context_decl_ref.is_a?(Array(String)) ? settings.authn_context_decl_ref.as(Array(String)) : [settings.authn_context_decl_ref]
           authn_contexts_decl_refs.each do |authn_context_decl_ref|
             decl_ref = requested_context.add_element "saml:AuthnContextDeclRef"
-            decl_ref.text = authn_context_decl_ref
+            decl_ref.text = authn_context_decl_ref if authn_context_decl_ref
           end
         end
       end
@@ -169,9 +178,15 @@ module Saml
 
     def sign_document(document, settings)
       if settings.idp_sso_service_binding == Utils::BINDINGS[:post] && settings.security[:authn_requests_signed] && settings.private_key && settings.certificate
-        private_key = settings.get_sp_key
-        cert = settings.get_sp_cert
-        document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+        if private_key = settings.get_sp_key
+          if cert = settings.get_sp_cert
+            document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+          else
+            raise "No certificate found"
+          end
+        else
+          raise "No private key found"
+        end
       end
 
       document

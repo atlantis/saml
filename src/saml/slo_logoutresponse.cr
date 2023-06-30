@@ -105,7 +105,7 @@ module Saml
     end
 
     def create_xml_document(settings, request_id = nil, logout_message = nil, status_code = nil)
-      time = Time.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+      time = Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ")
 
       response_doc = XMLSecurity::Document.new
       response_doc.uuid = uuid
@@ -119,9 +119,9 @@ module Saml
       root.attributes["InResponseTo"] = request_id unless request_id.nil?
       root.attributes["Destination"] = destination unless destination.nil? || destination.empty?
 
-      if settings.sp_entity_id != nil
+      if sp_entity_id = settings.sp_entity_id
         issuer = root.add_element "saml:Issuer"
-        issuer.text = settings.sp_entity_id
+        issuer.text = sp_entity_id
       end
 
       # add status
@@ -143,9 +143,15 @@ module Saml
     def sign_document(document, settings)
       # embed signature
       if settings.idp_slo_service_binding == Utils::BINDINGS[:post] && settings.private_key && settings.certificate
-        private_key = settings.get_sp_key
-        cert = settings.get_sp_cert
-        document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+        if private_key = settings.get_sp_key
+          if cert = settings.get_sp_cert
+            document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+          else
+            raise "No cert"
+          end
+        else
+          raise "No private key"
+        end
       end
 
       document

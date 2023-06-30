@@ -14,6 +14,16 @@ class XML::Node
   def <<( node : Node )
     self.add_child( node )
   end
+
+  def add_element(tag_name, namespaces  = {} of String => String)
+    namespaces_string = namespaces.map { |k,v| "#{k}=\"#{v}\"" }.join(" ")
+    if node = XML.parse("<#{tag_name}#{ " #{namespaces_string}" if namespaces_string}></#{tag_name}>", )
+      self << node
+      node
+    else
+      raise "Couldn't create node #{tag_name}"
+    end
+  end
 end
 
 class XML::NodeSet

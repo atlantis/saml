@@ -47,8 +47,8 @@ class Minitest::Test
 
   def response_document_without_recipient_with_time_updated
     doc = Base64.decode(response_document_without_recipient)
-    doc.gsub!(/NotBefore=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotBefore=\"#{(Time.now - 300).getutc.strftime("%Y-%m-%dT%XZ")}\"")
-    doc.gsub!(/NotOnOrAfter=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotOnOrAfter=\"#{(Time.now + 300).getutc.strftime("%Y-%m-%dT%XZ")}\"")
+    doc.gsub!(/NotBefore=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotBefore=\"#{(Time.utc - 300.seconds).to_s("%Y-%m-%dT%XZ")}\"")
+    doc.gsub!(/NotOnOrAfter=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotOnOrAfter=\"#{(Time.utc + 300.seconds).to_s("%Y-%m-%dT%XZ")}\"")
     Base64.encode(doc)
   end
 
@@ -246,7 +246,7 @@ class Minitest::Test
   end
 
   def crystal_saml_cert_fingerprint
-    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(crystal_saml_cert.to_der).scan(/../).join(":")
+    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(crystal_saml_cert.public_key.to_der).scan(/../).join(":")
   end
 
   def crystal_saml_cert_text

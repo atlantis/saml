@@ -3,7 +3,7 @@
 def default_logout_response_opts
   {
       :uuid => "_28024690-000e-0130-b6d2-38f6b112be8b",
-      :issue_instant => Time.now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+      :issue_instant => Time.utc.to_s('%Y-%m-%dT%H:%M:%SZ'),
       :settings => settings
   }
 end

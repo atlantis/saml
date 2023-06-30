@@ -7,6 +7,8 @@ module Saml
     alias Value = String | Int32 | Bool
 
     @single_logout_service_binding : String?
+    @idp_sso_service_binding : String?
+    @idp_slo_service_binding : Symbol?
 
     # IdP Data
     property idp_entity_id : String?
@@ -17,34 +19,34 @@ module Saml
     property idp_cert_fingerprint : String?
     property idp_cert_fingerprint_algorithm : String?
     property idp_cert_multi = {} of Symbol => Array(String)
-    property :idp_attribute_names
-    property :idp_name_qualifier
-    property :valid_until
+    property idp_attribute_names : Array(String)?
+    property idp_name_qualifier : String?
+    property valid_until : Time?
     # SP Data
     setter sp_entity_id : String?
     property assertion_consumer_service_url : String?
     getter assertion_consumer_service_binding : String?
     setter single_logout_service_url : String?
     property sp_name_qualifier : String?
-    property :name_identifier_format
-    property :name_identifier_value
-    property :name_identifier_value_requested
-    property :sessionindex
+    property name_identifier_format : String?
+    property name_identifier_value : String?
+    property name_identifier_value_requested : String?
+    property sessionindex : String?
     property compress_request : Bool = true
     property compress_response : Bool = true
     property double_quote_xml_attribute_values : Bool = true
     property message_max_bytesize : Int32 = 250000
-    property :passive
+    property passive : Bool?
     getter protocol_binding : String?
-    property :attributes_index
-    property :force_authn
-    property :certificate
-    property :certificate_new
+    property attributes_index : Int32?
+    property force_authn : Bool?
+    property certificate : String?
+    property certificate_new : String?
     property private_key : String?
-    property :authn_context
-    property :authn_context_comparison
-    property :authn_context_decl_ref
-    getter :attribute_consuming_service
+    property authn_context : String | Array(String) | Nil
+    property authn_context_comparison : String?
+    property authn_context_decl_ref : String?
+    getter attribute_consuming_service : AttributeService?
     # Work-flow
     property security = {} of Symbol => Value
     property soft : Bool = true
@@ -52,8 +54,8 @@ module Saml
     property :assertion_consumer_logout_service_url
     getter :assertion_consumer_logout_service_binding
     property issuer : String?
-    property :idp_sso_target_url
-    property :idp_slo_target_url
+    property idp_sso_target_url : String?
+    property idp_slo_target_url : String?
 
     DEFAULTS = {
       :assertion_consumer_service_binding => Utils::BINDINGS[:post],
@@ -255,15 +257,20 @@ module Saml
     # @return [OpenSSL::X509::Certificate|nil] Build the SP certificate from the settings (previously format it)
     #
     def get_sp_cert
-      return nil if certificate.nil? || certificate.empty?
+      return nil unless certificate.presence
 
-      formatted_cert = Saml::Utils.format_cert(certificate)
-      cert = OpenSSL::X509::Certificate.new(formatted_cert)
-
-      if security[:check_sp_cert_expiration]
-        if Saml::Utils.is_cert_expired(cert)
-          raise Saml::ValidationError.new("The SP certificate expired.")
+      if formatted_cert = Saml::Utils.format_cert(certificate)
+        if cert = OpenSSL::X509::Certificate.new(formatted_cert)
+          if security[:check_sp_cert_expiration]
+            if Saml::Utils.is_cert_expired(cert)
+              raise Saml::ValidationError.new("The SP certificate expired.")
+            end
+          end
+        else
+          raise Saml::ValidationError.new("Couldn't create cert")
         end
+      else
+        raise Saml::ValidationError.new("Couldn't format cert")
       end
 
       cert

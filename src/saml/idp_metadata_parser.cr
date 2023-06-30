@@ -111,7 +111,7 @@ module Saml
         cache_valid_until_timestamp = Saml::Utils.parse_duration(parsed_metadata[:cache_duration])
         unless cache_valid_until_timestamp.nil?
           if parsed_metadata[:valid_until].nil? || cache_valid_until_timestamp < Time.parse(parsed_metadata[:valid_until], Time.utc).to_i
-            parsed_metadata[:valid_until] = Time.at(cache_valid_until_timestamp).utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+            parsed_metadata[:valid_until] = Time.unix(cache_valid_until_timestamp).utc.to_s("%Y-%m-%dT%H:%M:%SZ")
           end
         end
       end

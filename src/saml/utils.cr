@@ -32,10 +32,14 @@ module Saml
     #
     def self.is_cert_expired(cert)
       if cert.is_a?(String)
-        cert = OpenSSL::X509::Certificate.new(cert)
+        if cert = OpenSSL::X509::Certificate.new(cert)
+          return cert.not_nil!.not_after < Time.utc
+        else
+          raise "Can't parse cert"
+        end
+      else
+        raise "No cert"
       end
-
-      return cert.not_nil!.not_after < Time.utc
     end
 
     # Interprets a ISO8601 duration value relative to a given timestamp.
@@ -350,7 +354,7 @@ module Saml
     end
 
     def self.uuid
-      "#{UUID_PREFIX}" + (RUBY_VERSION < "1.9" ? "#{@@uuid_generator.generate}" : "#{SecureRandom.uuid}")
+      "#{UUID_PREFIX}#{UUID.random}"
     end
 
     # Given two strings, attempt to match them as URIs using URL parse method.  If they can be parsed,

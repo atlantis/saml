@@ -41,7 +41,7 @@ module Saml
       root = meta_doc.add_element("md:EntityDescriptor", namespaces)
       root.attributes["ID"] = Saml::Utils.uuid
       root.attributes["entityID"] = settings.sp_entity_id if settings.sp_entity_id
-      root.attributes["validUntil"] = valid_until.utc.strftime("%Y-%m-%dT%H:%M:%SZ") if valid_until
+      root.attributes["validUntil"] = valid_until.utc.to_s("%Y-%m-%dT%H:%M:%SZ") if valid_until
       root.attributes["cacheDuration"] = "PT" + cache_duration.to_s + "S" if cache_duration
       root
     end

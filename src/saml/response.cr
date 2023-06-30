@@ -86,6 +86,10 @@ module Saml
       end
     end
 
+    def errors : Array(String)
+      @error_messages
+    end
+
     # Validates the SAML Response with the default values (soft = true)
     # @param collect_errors [Boolean] Stop validation when first error appears or keep validating. (if soft=true)
     # @return [Boolean] TRUE if the SAML Response is valid
@@ -430,10 +434,10 @@ module Saml
       ]
 
       if collect_errors
-        validations.each { |validation| validation.call }
+        validations.each { |validation| validation.call if validation.responds_to?(:call) }
         @error_messages.empty?
       else
-        validations.all? { |validation| validation.call }
+        validations.all? { |validation| validation.call if validation.responds_to?(:call) }
       end
     end
 

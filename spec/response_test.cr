@@ -1377,11 +1377,15 @@ class RubySamlTest < Minitest::Test
         document = XMLSecurity::Document.new(xml)
 
         formatted_cert = Saml::Utils.format_cert(crystal_saml_cert_text)
-        cert = OpenSSL::X509::Certificate.new(formatted_cert)
+        refute_nil formatted_cert
+        cert = OpenSSL::X509::Certificate.new(formatted_cert.not_nil!)
 
         formatted_private_key = Saml::Utils.format_private_key(crystal_saml_key_text)
-        private_key = OpenSSL::PKey::RSA.new(formatted_private_key)
-        document.sign_document(private_key, cert)
+        if private_key = OpenSSL::PKey::RSA.new(formatted_private_key)
+          document.sign_document(private_key, cert)
+        else
+          assert_equal false, "Couldn't parse private key"
+        end
 
         signed_response = Saml::Response.new(document.to_s)
         settings.assertion_consumer_service_url = "http://recipient"

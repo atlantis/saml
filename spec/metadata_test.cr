@@ -82,7 +82,7 @@ class MetadataTest < Minitest::Test
       assert_equal xml_metadata[0..start.size - 1], start
 
       doc_metadata = REXML::Document.new(xml_metadata)
-      assert_equal valid_until.strftime("%Y-%m-%dT%H:%M:%SZ"), doc_metadata.xpath_node("//md:EntityDescriptor").attribute("validUntil").value
+      assert_equal valid_until.to_s("%Y-%m-%dT%H:%M:%SZ"), doc_metadata.xpath_node("//md:EntityDescriptor").attribute("validUntil").value
       assert_equal "PT604800S", doc_metadata.xpath_node("//md:EntityDescriptor").attribute("cacheDuration").value
     end
 
