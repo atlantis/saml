@@ -216,11 +216,11 @@ module Saml
         else
           printable_code = raw_status_code.split(":").last
         end
-        error_msg << ", was " + printable_code
+        error_msg += ", was " + printable_code
       end
 
       unless status_message.nil?
-        error_msg << " -> " + status_message
+        error_msg += " -> " + status_message
       end
 
       error_msg

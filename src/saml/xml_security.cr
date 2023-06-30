@@ -47,7 +47,7 @@ module XMLSecurity
       end
     end
 
-    def algorithm(element : XML::Node | String)
+    def self.algorithm(element : XML::Node | String)
       if algorithm = element
         if algorithm.is_a?(XML::Node)
           algorithm = element["Algorithm"]
@@ -187,7 +187,7 @@ module XMLSecurity
   class SignedDocument < BaseDocument
     include Saml::ErrorHandling
 
-    setter :signed_element_id
+    setter signed_element_id : String?
 
     @working_copy : XML::Node? = nil
 
@@ -200,7 +200,7 @@ module XMLSecurity
       @signed_element_id ||= extract_signed_element_id
     end
 
-    def validate_document(idp_cert_fingerprint, soft = true, options = {} of Symbol => String)
+    def validate_document(idp_cert_fingerprint, soft = true, options = {} of Symbol => String | OpenSSL::X509::Certificate)
       # get cert from response
       cert_element = self.xpath_node(
         "//ds:X509Certificate",
@@ -216,12 +216,13 @@ module XMLSecurity
             return append_error("Document Certificate Error", soft)
           end
 
-          if options[:fingerprint_alg]
-            fingerprint_alg = XMLSecurity::BaseDocument.new.algorithm(options[:fingerprint_alg]).new
+          if fingeralg = options[:fingerprint_alg].as?(String)
+            fingerprint_alg = BaseDocument.algorithm(fingeralg)
           else
             fingerprint_alg = OpenSSL::Digest.new("SHA1")
           end
-          fingerprint = fingerprint_alg.hexdigest(cert.to_der)
+          fingerprint_alg << cert.public_key.to_der
+          fingerprint = fingerprint_alg.hexfinal
 
           # check cert matches registered idp cert
           if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/, "").downcase
@@ -231,8 +232,11 @@ module XMLSecurity
           return append_error("No cert element", soft)
         end
       else
-        if options[:cert]
-          base64_cert = Base64.encode(options[:cert].to_pem)
+        case raw_cert = options[:cert]
+        when OpenSSL::X509::Certificate
+          base64_cert = Base64.encode(raw_cert.to_pem)
+        when String
+          base64_cert = raw_cert
         else
           if soft
             return false
@@ -252,22 +256,30 @@ module XMLSecurity
       )
 
       if cert_element
-        base64_cert = Saml::Utils.element_text(cert_element)
-        cert_text = Base64.decode_string(base64_cert)
-        begin
-          cert = OpenSSL::X509::Certificate.new(cert_text)
-        rescue _e : OpenSSL::X509::CertificateError
-          return append_error("Document Certificate Error", soft)
-        end
+        if base64_cert = Saml::Utils.element_text(cert_element)
+          cert_text = Base64.decode_string(base64_cert)
+          begin
+            cert = OpenSSL::X509::Certificate.new(cert_text)
+          rescue _e : OpenSSL::X509::CertificateError
+            return append_error("Document Certificate Error", soft)
+          end
 
-        # check saml response cert matches provided idp cert
-        if idp_cert.to_pem != cert.to_pem
-          return append_error("Certificate of the Signature element does not match provided certificate", soft)
+          # check saml response cert matches provided idp cert
+          if idp_cert.to_pem != cert.to_pem
+            return append_error("Certificate of the Signature element does not match provided certificate", soft)
+          end
+        else
+          return append_error("Couldn't find text in cert element", soft)
         end
       else
         base64_cert = Base64.encode(idp_cert.to_pem)
       end
-      validate_signature(base64_cert, true)
+
+      if cert = base64_cert
+        validate_signature(cert, true)
+      else
+        return append_error("Couldn't find cert element", soft)
+      end
     end
 
     def validate_signature(base64_cert, soft = true)
@@ -283,11 +295,14 @@ module XMLSecurity
       )
 
       # signature method
-      sig_alg_value = sig_element.try(&.xpath_node(
-        "./ds:SignedInfo/ds:SignatureMethod",
-        { "ds" => DSIG }
-      ))
-      signature_algorithm = algorithm(sig_alg_value)
+      if sig_alg_value = sig_element.try(&.xpath_node(
+          "./ds:SignedInfo/ds:SignatureMethod",
+          { "ds" => DSIG }
+        ))
+        signature_algorithm = BaseDocument.algorithm(sig_alg_value)
+      else
+        return append_error("Could't find SignatureMethod node", soft)
+      end
 
       # get signature
       signature = if base64_signature = sig_element.try(&.xpath_node("./ds:SignatureValue",{ "ds" => DSIG }))
@@ -325,10 +340,7 @@ module XMLSecurity
 
       canon_hashed_element = hashed_element.try(&.canonicalize(mode: canon_algorithm, inclusive_ns: inclusive_namespaces))
 
-      # pick something absolutely impossible (worried nil might match sometimes)
-      digest_value = "-1"
-
-      if digest_algorithm = algorithm(ref.try(&.xpath_node("//ds:DigestMethod",{ "ds" => DSIG })))
+      if (method_node = ref.try(&.xpath_node("//ds:DigestMethod",{ "ds" => DSIG }))) && (digest_algorithm = BaseDocument.algorithm(method_node))
         if hashed = canon_hashed_element
           digest_algorithm << hashed
           hash = digest_algorithm.final
@@ -337,6 +349,8 @@ module XMLSecurity
             digest_value = Base64.decode(encoded_text)
           end
         end
+      else
+        return append_error("Couldn't find DigestMethod element", soft)
       end
 
       unless digests_match?(hash, digest_value)

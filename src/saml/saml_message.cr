@@ -26,11 +26,12 @@ module Saml
     #
     def version(document)
       @version ||= begin
-        node = document.xpath_node(
-          "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
-          { "p" => PROTOCOL }
-        )
-        node.nil? ? nil : node.attributes["Version"]
+        if node = document.xpath_node(
+            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            { "p" => PROTOCOL }
+          )
+          node["Version"]
+        end
       end
     end
 
@@ -38,11 +39,12 @@ module Saml
     #
     def id(document)
       @id ||= begin
-        node = document.xpath_node(
-          "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
-          { "p" => PROTOCOL }
-        )
-        node.nil? ? nil : node.attributes["ID"]
+        if node = document.xpath_node(
+            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            { "p" => PROTOCOL }
+          )
+          node["ID"]
+        end
       end
     end
 

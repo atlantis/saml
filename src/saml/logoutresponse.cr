@@ -87,21 +87,23 @@ module Saml
     #
     def status_code
       @status_code ||= begin
-        node = document.xpath_node(
-          "/p:LogoutResponse/p:Status/p:StatusCode",
-          { "p" => PROTOCOL }
-        )
-        node.nil? ? nil : node.attributes["Value"]
+        if node = document.xpath_node(
+            "/p:LogoutResponse/p:Status/p:StatusCode",
+            { "p" => PROTOCOL }
+          )
+          node["Value"]
+        end
       end
     end
 
     def status_message
       @status_message ||= begin
-        node = document.xpath_node(
-          "/p:LogoutResponse/p:Status/p:StatusMessage",
-          { "p" => PROTOCOL }
-        )
-        Utils.element_text(node)
+        if node = document.xpath_node(
+            "/p:LogoutResponse/p:Status/p:StatusMessage",
+            { "p" => PROTOCOL }
+          )
+          Utils.element_text(node)
+        end
       end
     end
 

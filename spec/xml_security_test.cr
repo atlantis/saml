@@ -2,13 +2,14 @@ require "./spec_helper"
 
 describe "XmlSecurity" do
   @base64cert : String?
+  @document : XMLSecurity::SignedDocument?
 
-  let(:decoded_response) { Base64.decode(response_document_without_recipient) }
+  let(:decoded_response) { Base64.decode_string(response_document_without_recipient) }
   let(:document) { XMLSecurity::SignedDocument.new(decoded_response) }
   let(:settings) { Saml::Settings.new() }
 
   before do
-    @base64cert = document.elements["//ds:X509Certificate"].text
+    @base64cert = document.xpath_string("//ds:X509Certificate")
   end
 
   it "should run validate without throwing NS related exceptions" do
@@ -189,6 +190,8 @@ describe "Signature Algorithms" do
 end
 
 describe "XmlSecurity::SignedDocument" do
+  let(:settings) { Saml::Settings.new() }
+
   describe "#extract_inclusive_namespaces" do
     it "support explicit namespace resolution for exclusive canonicalization" do
       response = fixture(:open_saml_response, false)
@@ -303,14 +306,14 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     it "be able to validate a good response" do
-      Timecop.travel Time.parse("2012-11-28 17:55:00 UTC") do
-        response.stubs(:validate_subject_confirmation).returns(true)
+      Timecop.travel( Time.parse_rfc3339("2012-11-28 17:55:00 UTC") ) do
+        response = Saml::Response.new(fixture(:starfield_response), options: {:skip_subject_confirmation => true})
         assert response.is_valid?
       end
     end
 
     it "fail before response is valid" do
-      Timecop.travel Time.parse("2012-11-20 17:55:00 UTC") do
+      Timecop.travel( Time.parse_rfc3339("2012-11-20 17:55:00 UTC") ) do
         assert !response.is_valid?
 
         time_1 = "2012-11-20 17:55:00 UTC < 2012-11-28 17:53:45 UTC"
@@ -325,7 +328,7 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     it "fail after response expires" do
-      Timecop.travel Time.parse("2012-11-30 17:55:00 UTC") do
+      Timecop.travel( Time.self.parse_rfc3339("2012-11-30 17:55:00 UTC") ) do
         assert !response.is_valid?
 
         contains_expected_error = response.errors.includes?("Current time is on or after NotOnOrAfter condition (2012-11-30 17:55:00 UTC >= 2012-11-28 18:33:45 UTC + 1s)")
@@ -338,7 +341,9 @@ describe "XmlSecurity::SignedDocument" do
   describe "#validate_document" do
     describe "with valid document" do
       describe "when response has signed message and assertion" do
-        let(:document_data) { read_response("response_with_signed_message_and_assertion.xml") }
+        @document_data : String?
+
+        let(document_data) { read_response("response_with_signed_message_and_assertion.xml") }
         let(:document) { Saml::Response.new(document_data).document }
         let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
 
@@ -348,6 +353,8 @@ describe "XmlSecurity::SignedDocument" do
       end
 
       describe "when response has signed assertion" do
+        @document_data : String?
+
         let(:document_data) { read_response("response_with_signed_assertion_3.xml") }
         let(:document) { Saml::Response.new(document_data).document }
         let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
@@ -359,6 +366,8 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "signature_wrapping_attack" do
+      @document_data : String?
+
       let(:document_data) { read_invalid_response("signature_wrapping_attack.xml.base64") }
       let(:document) { Saml::Response.new(document_data).document }
       let(:fingerprint) { "afe71c28ef740bc87425be13a2263d37971da1f9" }
@@ -369,6 +378,8 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "signature wrapping attack - doubled SAML response body" do
+      @document_data : String?
+
       let(:document_data) { read_invalid_response("response_with_doubled_signed_assertion.xml") }
       let(:document) { Saml::Response.new(document_data) }
       let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
@@ -380,6 +391,8 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "signature wrapping attack - concealed SAML response body" do
+      @document_data : String?
+
       let(:document_data) { read_invalid_response("response_with_concealed_signed_assertion.xml") }
       let(:document) { Saml::Response.new(document_data) }
       let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
@@ -392,6 +405,8 @@ describe "XmlSecurity::SignedDocument" do
   end
 
   describe "#validate_document_with_cert" do
+    @document_data : String?
+
     let(:document_data) { read_response("response_with_signed_message_and_assertion.xml") }
     let(:document) { Saml::Response.new(document_data).document }
     let(:idp_cert) { OpenSSL::X509::Certificate.new(crystal_saml_cert_text) }
@@ -427,6 +442,7 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "when response has no cert but you have local cert" do
+      @document_data : String?
       let(:document_data) { response_document_valid_signed_without_x509certificate }
 
       it "is valid" do
@@ -435,6 +451,7 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "when response cert is invalid" do
+      @document_data : String?
       let(:document_data) do
         contents = read_response("response_with_signed_message_and_assertion.xml")
         contents.sub(/<ds:X509Certificate>.*<\/ds:X509Certificate>/,

@@ -10,18 +10,18 @@ module Saml
 
     # IdP Data
     property :idp_entity_id
-    setter :idp_sso_service_url
-    setter :idp_slo_service_url
-    property :idp_slo_response_service_url
-    property :idp_cert
-    property :idp_cert_fingerprint
+    setter idp_sso_service_url : String?
+    setter idp_slo_service_url : String?
+    property idp_slo_response_service_url : String?
+    property idp_cert : String?
+    property idp_cert_fingerprint : String?
     property idp_cert_fingerprint_algorithm : String?
-    property :idp_cert_multi
+    property idp_cert_multi = {} of Symbol => Array(String)
     property :idp_attribute_names
     property :idp_name_qualifier
     property :valid_until
     # SP Data
-    setter :sp_entity_id
+    setter sp_entity_id : String?
     property assertion_consumer_service_url : String?
     getter assertion_consumer_service_binding : String?
     setter single_logout_service_url : String?
@@ -35,7 +35,7 @@ module Saml
     property double_quote_xml_attribute_values : Bool = true
     property message_max_bytesize : Int32 = 250000
     property :passive
-    getter :protocol_binding
+    getter protocol_binding : String?
     property :attributes_index
     property :force_authn
     property :certificate
@@ -83,15 +83,16 @@ module Saml
     }
 
     def initialize(overrides = {} of Symbol => Value | Hash(Symbol, Value), keep_security_attributes = false)
-      if keep_security_attributes
-        security_attributes = overrides.delete(:security).as?(Hash(Symbol, Value)) || {} of Symbol => Value
+      # if keep_security_attributes
+      #   security_attributes = overrides.delete(:security).as?(Hash(Symbol, Value)) || {} of Symbol => Value
+      #   config = DEFAULTS.merge(overrides)
+      #   if security_defaults = DEFAULTS[:security].as?( Hash(Symbol, Value) )
+      #     config[:security] = security_defaults.merge(security_attributes)
+      #   end
+      # else
+      # Can't find where keep_security_attributes is used?
         config = DEFAULTS.merge(overrides)
-        if security_defaults = DEFAULTS[:security].as?( Hash(Symbol, Value) )
-          config[:security] = security_defaults.merge(security_attributes)
-        end
-      else
-        config = DEFAULTS.merge(overrides)
-      end
+      # end
 
       config.each do |k, v|
         # TODO: replace with slick macro
@@ -212,7 +213,7 @@ module Saml
       idp_cert_fingerprint || begin
         idp_cert = get_idp_cert
         if idp_cert
-          fingerprint_alg = XMLSecurity::BaseDocument.new.algorithm(idp_cert_fingerprint_algorithm).new
+          fingerprint_alg = XMLSecurity::BaseDocument.algorithm(idp_cert_fingerprint_algorithm)
           fingerprint_alg.hexdigest(idp_cert.to_der).upcase.scan(/../).join(":")
         end
       end
@@ -223,7 +224,7 @@ module Saml
     def get_idp_cert
       return nil if idp_cert.nil? || idp_cert.empty?
 
-      formatted_cert = Saml::Utils.format_cert(idp_cert)
+      formatted_cert = Saml::Utils.format_cert(idp_cert.not_nil!)
       OpenSSL::X509::Certificate.new(formatted_cert)
     end
 

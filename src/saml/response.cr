@@ -4,6 +4,7 @@ module Saml
   # SAML2 Authentication Response. SAML Response
   #
   class Response < SamlMessage
+    alias OptionValue = String | Bool
     include ErrorHandling
 
     ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion"
@@ -14,10 +15,10 @@ module Saml
     # TODO: Settings should probably be initialized too... WDYT?
 
     # Saml::Settings Toolkit settings
-    property :settings
+    property settings : Saml::Settings
 
-    getter :document
-    getter :decrypted_document
+    getter document : XMLSecurity::SignedDocument
+    getter decrypted_document : XMLSecurity::SignedDocument? = nil
     getter :response
     getter :options
 
@@ -25,6 +26,7 @@ module Saml
 
     @name_id : String?
     @name_id_format : String?
+    @name_id_node : XML::Node?
     @name_id_spnamequalifier : String?
     @name_id_namequalifier : String?
     @sessionindex : String?
@@ -34,7 +36,7 @@ module Saml
     @in_response_to : String?
     @destination : String?
     @assertion_id : String?
-    @soft : Bool
+    @soft : Bool = true
     @response : String
 
     # Response available options
@@ -56,14 +58,14 @@ module Saml
     #                          or skip the recipient validation of the subject confirmation element with :skip_recipient_check option
     #                          or skip the audience validation with :skip_audience option
     #
-    def initialize(response, options = {} of Symbol => String)
+    def initialize(response, options = {} of Symbol => OptionValue)
       raise ArgumentError.new("Response cannot be nil") if response.nil?
 
       @error_messages = [] of String
 
-      @options = options
+      @options = options.as(Hash(Symbol, OptionValue))
       @soft = true
-      @settings = options[:settings].as?(Saml::Settings)
+      @settings = options[:settings].as?(Saml::Settings) || Saml::Settings.new
       if settings = @settings
         unless settings.soft.nil?
           @soft = settings.soft
@@ -226,7 +228,7 @@ module Saml
         )
         if nodes.size == 1
           node = nodes[0]
-          code = node.attributes["Value"] if node && node.attributes
+          code = node["Value"] if node
 
           unless code == "urn:oasis:names:tc:SAML:2.0:status:Success"
             nodes = document.xpath_nodes(
@@ -497,12 +499,16 @@ module Saml
       end
 
       unless decrypted_document.nil?
-        assertions = decrypted_document.xpath_nodes(
-          "//a:Assertion",
-          { "a" => ASSERTION }
-        )
-        unless assertions.size == 1
-          return append_error(error_msg)
+        if ddoc = decrypted_document
+          assertions = ddoc.xpath_nodes(
+            "//a:Assertion",
+            { "a" => ASSERTION }
+          )
+          unless assertions.size == 1
+            return append_error(error_msg)
+          end
+        else
+          return append_error("No decrypted document to check num assertions")
         end
       end
 
@@ -832,72 +838,74 @@ module Saml
       )
 
       use_original = sig_elements.size == 1 || decrypted_document.nil?
-      doc = use_original ? document : decrypted_document
-
-      # Check signature nodes
-      if sig_elements.nil? || sig_elements.size == 0
-        sig_elements = doc.xpath_nodes(
-          "/p:Response/a:Assertion[@ID=$id]/ds:Signature",
-          { "p" => PROTOCOL, "a" => ASSERTION, "ds" => DSIG },
-          { "id" => doc.signed_element_id }
-        )
-      end
-
-      if sig_elements.size != 1
-        if sig_elements.size == 0
-          append_error("Signed element id ##{doc.signed_element_id} is not found")
-        else
-          append_error("Signed element id ##{doc.signed_element_id} is found more than once")
+      if doc = use_original ? document : decrypted_document
+        # Check signature nodes
+        if sig_elements.nil? || sig_elements.size == 0
+          sig_elements = doc.xpath_nodes(
+            "/p:Response/a:Assertion[@ID=$id]/ds:Signature",
+            { "p" => PROTOCOL, "a" => ASSERTION, "ds" => DSIG },
+            { "id" => doc.signed_element_id }
+          )
         end
-        return append_error(error_msg)
-      end
 
-      old_errors = @error_messages.clone
-
-      idp_certs = settings.get_idp_cert_multi
-      if idp_certs.nil? || idp_certs[:signing].empty?
-        opts = {} of Symbol => String
-        opts[:fingerprint_alg] = settings.idp_cert_fingerprint_algorithm
-        idp_cert = settings.get_idp_cert
-        fingerprint = settings.get_fingerprint
-        opts[:cert] = idp_cert
-
-        if fingerprint && doc.validate_document(fingerprint, @soft, opts)
-          if settings.security[:check_idp_cert_expiration]
-            if Saml::Utils.is_cert_expired(idp_cert)
-              error_msg = "IdP x509 certificate expired"
-              return append_error(error_msg)
-            end
+        if sig_elements.size != 1
+          if sig_elements.size == 0
+            append_error("Signed element id ##{doc.signed_element_id} is not found")
+          else
+            append_error("Signed element id ##{doc.signed_element_id} is found more than once")
           end
-        else
           return append_error(error_msg)
         end
-      else
-        valid = false
-        expired = false
-        idp_certs[:signing].each do |idp_cert|
-          valid = doc.validate_document_with_cert(idp_cert, true)
-          if valid
+
+        old_errors = @error_messages.clone
+
+        idp_certs = settings.get_idp_cert_multi
+        if idp_certs.nil? || idp_certs[:signing].empty?
+          opts = {} of Symbol => String
+          opts[:fingerprint_alg] = settings.idp_cert_fingerprint_algorithm
+          idp_cert = settings.get_idp_cert
+          fingerprint = settings.get_fingerprint
+          opts[:cert] = idp_cert
+
+          if fingerprint && doc.validate_document(fingerprint, @soft, opts)
             if settings.security[:check_idp_cert_expiration]
               if Saml::Utils.is_cert_expired(idp_cert)
-                expired = true
+                error_msg = "IdP x509 certificate expired"
+                return append_error(error_msg)
               end
             end
+          else
+            return append_error(error_msg)
+          end
+        else
+          valid = false
+          expired = false
+          idp_certs[:signing].each do |idp_cert|
+            valid = doc.validate_document_with_cert(idp_cert, true)
+            if valid
+              if settings.security[:check_idp_cert_expiration]
+                if Saml::Utils.is_cert_expired(idp_cert)
+                  expired = true
+                end
+              end
 
-            # At least one certificate is valid, restore the old accumulated errors
-            @error_messages = old_errors
-            break
+              # At least one certificate is valid, restore the old accumulated errors
+              @error_messages = old_errors
+              break
+            end
+          end
+          if expired
+            error_msg = "IdP x509 certificate expired"
+            return append_error(error_msg)
+          end
+          unless valid
+            # Remove duplicated errors
+            @error_messages = @error_messages.uniq
+            return append_error(error_msg)
           end
         end
-        if expired
-          error_msg = "IdP x509 certificate expired"
-          return append_error(error_msg)
-        end
-        unless valid
-          # Remove duplicated errors
-          @error_messages = @error_messages.uniq
-          return append_error(error_msg)
-        end
+      else
+        return append_error("Document not found")
       end
 
       true
@@ -921,18 +929,21 @@ module Saml
     # @return [XML::Node | nil] If any matches, return the Element
     #
     private def xpath_first_from_signed_assertion(subelt = nil)
-      doc = decrypted_document.nil? ? document : decrypted_document
-      node = doc.xpath_node(
-        "/p:Response/a:Assertion[@ID=$id]#{subelt}",
-        { "p" => PROTOCOL, "a" => ASSERTION },
-        { "id" => doc.signed_element_id }
-      )
-      node ||= doc.xpath_node(
-        "/p:Response[@ID=$id]/a:Assertion#{subelt}",
-        { "p" => PROTOCOL, "a" => ASSERTION },
-        { "id" => doc.signed_element_id }
-      )
-      node
+      if doc = decrypted_document.nil? ? document : decrypted_document
+        node = doc.xpath_node(
+          "/p:Response/a:Assertion[@ID=$id]#{subelt}",
+          { "p" => PROTOCOL, "a" => ASSERTION },
+          { "id" => doc.signed_element_id }
+        )
+        node ||= doc.xpath_node(
+          "/p:Response[@ID=$id]/a:Assertion#{subelt}",
+          { "p" => PROTOCOL, "a" => ASSERTION },
+          { "id" => doc.signed_element_id }
+        )
+        node
+      else
+        nil
+      end
     end
 
     # Extracts all the appearances that matchs the subelt (pattern)
@@ -972,16 +983,23 @@ module Saml
     # @return [XMLSecurity::SignedDocument] The SAML Response with the assertion decrypted
     #
     private def decrypt_assertion_from_document(document_copy)
-      response_node = document_copy.xpath_node(
-        "/p:Response/",
-        { "p" => PROTOCOL }
-      )
-      if encrypted_assertion_node = document_copy.xpath_node("(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",{ "p" => PROTOCOL, "a" => ASSERTION })
-        response_node.add(decrypt_assertion(encrypted_assertion_node))
-        encrypted_assertion_node.remove
-        XMLSecurity::SignedDocument.new(response_node.to_s)
+      if response_node = document_copy.xpath_node(
+          "/p:Response/",
+          { "p" => PROTOCOL }
+        )
+        if encrypted_assertion_node = document_copy.xpath_node("(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",{ "p" => PROTOCOL, "a" => ASSERTION })
+          if decrypted = decrypt_assertion(encrypted_assertion_node)
+            response_node << decrypted
+          else
+            raise "Could not decrypt the EncryptedAssertion element"
+          end
+          encrypted_assertion_node.unlink
+          XMLSecurity::SignedDocument.new(response_node.to_s)
+        else
+          raise "Could not find an EncryptedAssertion element in the response"
+        end
       else
-        raise "Could not find an EncryptedAssertion element in the response"
+        raise "Could not find Response node"
       end
     end
 

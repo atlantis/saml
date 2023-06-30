@@ -6,6 +6,7 @@ require "../src/saml"
 class Minitest::Test
   @response_document_without_attributes : String?
   @response_document_without_recipient : String?
+  @response_document_valid_signed_without_x509certificate : String?
 
   def fixture(document, base64 = true)
     response = Dir.glob(File.join(File.dirname(__FILE__), "responses", "#{document}*")).first
