@@ -247,7 +247,7 @@ class Minitest::Test
   end
 
   def crystal_saml_cert_fingerprint
-    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(crystal_saml_cert.public_key.to_der).scan(/../).map{|r|r[0]}.join(":")
+    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(Base64.decode(XMLSecurity::BaseDocument.pem_to_der(crystal_saml_cert.to_pem))).scan(/../).map{|r|r[0]}.join(":")
     @crystal_saml_cert_fingerprint.not_nil!
   end
 

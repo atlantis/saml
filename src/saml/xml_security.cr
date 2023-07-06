@@ -66,7 +66,18 @@ module XMLSecurity
       end
     end
 
+    def pem_to_der( pem : String )
+      self.class.pem_to_der( pem )
+    end
 
+    def self.pem_to_der( pem : String )
+      pem.gsub(/-----BEGIN (.*?)-----/, "").gsub(/-----END (.*?)-----/, "").gsub(/\s/m, "")
+    end
+
+    # DO NOT FORMAT
+    def to_s
+      self.to_xml(options: XML::SaveOptions::AS_XML)
+    end
   end
 
   class Document < BaseDocument
@@ -88,15 +99,6 @@ module XMLSecurity
     def initialize(tag_name, namespaces  = {} of String => String)
       namespaces_string = namespaces.map { |k,v| "#{k}=\"#{v}\"" }.join(" ")
       super(XML.parse("<#{tag_name}#{ " #{namespaces_string}" if namespaces_string}></#{tag_name}>").to_unsafe)
-    end
-
-    def pem_to_der( pem : String )
-      pem.gsub(/-----BEGIN (.*?)-----/, "").gsub(/-----END (.*?)-----/, "")
-    end
-
-    # DO NOT FORMAT
-    def to_s
-      self.to_xml(options: XML::SaveOptions::AS_XML)
     end
 
     def to_xml
@@ -239,17 +241,18 @@ module XMLSecurity
     def format_certificate(cert_text : String?) : String?
       return nil unless cert_text
 
+      # memory error possible unless base64 newlines are respected!
       if cert_text.starts_with?("-----BEGIN CERTIFICATE-----")
-        cert_text
-      else
-        "-----BEGIN CERTIFICATE-----\n#{cert_text.strip}\n-----END CERTIFICATE-----"
+        cert_text = cert_text.gsub("-----BEGIN CERTIFICATE-----", "").gsub("-----END CERTIFICATE-----", "").gsub(/\s/m, "")
       end
+
+      "-----BEGIN CERTIFICATE-----\n#{Base64.encode(Base64.decode(cert_text)).strip}\n-----END CERTIFICATE-----"
     end
 
     def load_cert( cert_text : String? ) : OpenSSL::X509::Certificate?
       if formatted = format_certificate( cert_text )
         begin
-          OpenSSL::X509::Certificate.new(formatted)
+          return OpenSSL::X509::Certificate.new(formatted)
         rescue _e : OpenSSL::X509::CertificateError
         end
       end
@@ -261,11 +264,9 @@ module XMLSecurity
       # get cert from response
       if cert_element = self.xpath_node("//ds:X509Certificate", { "ds" => DSIG })
         if base64_cert = Saml::Utils.element_text(cert_element)
-          cert_text = Base64.decode_string(base64_cert)
-          cert_content_from_document = if cert = load_cert(cert_text)
-            cert.to_pem.gsub("-----BEGIN CERTIFICATE-----", "").gsub("-----END CERTIFICATE-----", "").gsub("\n", "")
-          else
-            base64_cert
+          #cert_text = Base64.decode_string(base64_cert)
+          unless cert = load_cert(base64_cert)
+            return append_error("Couldn't load certificate from document", soft)
           end
 
           if fingeralg = options[:fingerprint_alg]?.as?(String)
@@ -273,9 +274,9 @@ module XMLSecurity
           else
             fingerprint_alg = Digest::SHA1.new
           end
-          fingerprint_alg << Base64.decode( cert_content_from_document )
+          fingerprint_alg << Base64.decode( pem_to_der( cert.to_pem ) )
           fingerprint = fingerprint_alg.hexfinal
-puts "IDP CERT FINGERPRINT: #{idp_cert_fingerprint} DOCUMENT FINGERPRINT: #{fingerprint}"
+
           # check cert matches registered idp cert
           if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/, "").downcase
             return append_error("Fingerprint mismatch", soft)
@@ -357,7 +358,7 @@ puts "IDP CERT FINGERPRINT: #{idp_cert_fingerprint} DOCUMENT FINGERPRINT: #{fing
         # get signature
         signature = if base64_signature = sig_element.try(&.xpath_node("./ds:SignatureValue",{ "ds" => DSIG }))
           if scrubbed_text = Saml::Utils.element_text(base64_signature)
-            Base64.decode(scrubbed_text)
+            Base64.decode_string(scrubbed_text)
           end
         end
 
@@ -432,20 +433,16 @@ puts "IDP CERT FINGERPRINT: #{idp_cert_fingerprint} DOCUMENT FINGERPRINT: #{fing
         end
 
         # get certificate object
-        if bcert = base64_cert
-          begin
-            cert_text = Base64.decode_string(bcert)
-            cert = OpenSSL::X509::Certificate.new(cert_text)
-          rescue ex : OpenSSL::X509::CertificateError
-            return append_error("Couldn't load X509 certificate", soft)
-          end
+        unless cert = load_cert(base64_cert)
+          return append_error("Couldn't load X509 certificate", soft)
+        end
 
-          # verify signature
-          unless cert.public_key.verify(digest: signature_algorithm, signature: signature, data: canon_string)
-            return append_error("Key validation error", soft)
-          end
-        else
-          return append_error("Couln't get base64 cert", soft)
+puts "signature: #{signature}\n\n"
+puts "Cannon string\n#{canon_string}"
+
+        # verify signature
+        unless cert.public_key.verify(digest: signature_algorithm, signature: signature, data: canon_string)
+          return append_error("Key validation error", soft)
         end
       else
         return append_error("Couln't get a copy of the document", soft)
