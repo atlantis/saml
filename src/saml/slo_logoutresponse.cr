@@ -107,12 +107,12 @@ module Saml
     def create_xml_document(settings, request_id = nil, logout_message = nil, status_code = nil)
       time = Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ")
 
-      response_doc = XMLSecurity::Document.new
+      response_doc = XMLSecurity::Document.new("samlp:LogoutResponse", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" })
       response_doc.uuid = uuid
 
       destination = settings.idp_slo_response_service_url || settings.idp_slo_service_url
 
-      root = response_doc.add_element "samlp:LogoutResponse", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" }
+      root = response_doc.root.not_nil!
       root.attributes["ID"] = uuid
       root.attributes["IssueInstant"] = time
       root.attributes["Version"] = "2.0"

@@ -20,5 +20,9 @@ module Saml
     def reset_errors!
       @error_messages = [] of String
     end
+
+    def errors
+      @error_messages
+    end
   end
 end

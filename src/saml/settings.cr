@@ -295,7 +295,7 @@ module Saml
     end
 
     def idp_binding_from_embed_sign
-      security[:embed_sign] ? Utils::BINDINGS[:post] : Utils::BINDINGS[:redirect]
+      security[:embed_sign]? ? Utils::BINDINGS[:post] : Utils::BINDINGS[:redirect]
     end
 
     def get_binding(value) : String?
@@ -307,7 +307,7 @@ module Saml
       when :redirect, "redirect"
         Utils::BINDINGS[:redirect]
       else
-        raise "Invalid binding: #{value}"
+        value
       end
     end
   end

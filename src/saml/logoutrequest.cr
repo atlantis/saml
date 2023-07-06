@@ -99,10 +99,12 @@ module Saml
     def create_xml_document(settings)
       time = Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ")
 
-      request_doc = XMLSecurity::Document.new("")
+      request_doc = XMLSecurity::Document.new("samlp:LogoutRequest", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" })
       request_doc.uuid = uuid
 
-      root = request_doc.add_element "samlp:LogoutRequest", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" }
+      root = request_doc.root
+      raise "Could not create LogoutRequest" unless root
+
       root["ID"] = uuid
       root["IssueInstant"] = time
       root["Version"] = "2.0"
@@ -138,7 +140,7 @@ module Saml
       if settings.idp_slo_service_binding == Utils::BINDINGS[:post] && settings.security[:logout_requests_signed] && settings.private_key && settings.certificate
         if private_key = settings.get_sp_key
           if cert = settings.get_sp_cert
-            document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+            document.sign_document(private_key, cert, settings.security[:signature_method].as?(String), settings.security[:digest_method])
           else
             raise "No cert"
           end

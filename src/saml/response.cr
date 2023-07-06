@@ -71,7 +71,7 @@ module Saml
 
       @options = options.as(Hash(Symbol, OptionValue))
       @soft = true
-      @settings = options[:settings].as?(Saml::Settings) || Saml::Settings.new
+      @settings = options[:settings]?.as?(Saml::Settings) || Saml::Settings.new
       if settings = @settings
         unless settings.soft.nil?
           @soft = settings.soft
@@ -181,7 +181,7 @@ module Saml
               end
 
               if node && (name = node["Name"])
-                if options[:check_duplicated_attributes] && attributes.includes?(name)
+                if options[:check_duplicated_attributes]? && attributes.includes?(name)
                   raise ValidationError.new("Found an Attribute element with duplicated Name")
                 end
 
@@ -375,7 +375,7 @@ module Saml
     # returns the allowed clock drift on timing validation
     # @return [Float]
     def allowed_clock_drift
-      if drift = options[:allowed_clock_drift].as?(Int32 | Float32)
+      if drift = options[:allowed_clock_drift]?.as?(Int32 | Float32)
         Time::Span.new(nanoseconds: ((drift.to_f.abs + Float32::EPSILON) * 1000000000).round.to_i)
       else
         Time::Span.new(seconds: 0)
@@ -387,8 +387,8 @@ module Saml
     #
     def assertion_encrypted?
       !document.xpath_node(
-        "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
-        { "p" => PROTOCOL, "a" => ASSERTION }
+        "(/samlp:Response/EncryptedAssertion)|(/samlp:Response/a:EncryptedAssertion)",
+        { "samlp" => PROTOCOL, "a" => ASSERTION }
       ).nil?
     end
 
@@ -554,7 +554,7 @@ module Saml
     # @raise [ValidationError] if soft == false and validation fails
     #
     private def validate_no_duplicated_attributes
-      if options[:check_duplicated_attributes]
+      if options[:check_duplicated_attributes]?
         begin
           attributes
         rescue e : ValidationError
@@ -623,7 +623,7 @@ module Saml
           return append_error("Found an unexpected number of Signature Element. SAML Response rejected")
         end
 
-        if settings.security[:want_assertions_signed] && !(signed_elements.includes? "Assertion")
+        if settings.security[:want_assertions_signed]? && !(signed_elements.includes? "Assertion")
           return append_error("The Assertion of the Response is not signed and the SP requires it")
         end
       else
@@ -654,7 +654,7 @@ module Saml
     # @raise [ValidationError] if soft == false and validation fails
     #
     private def validate_audience
-      return true if options[:skip_audience]
+      return true if options[:skip_audience]?
       return true if settings.sp_entity_id.nil? || settings.sp_entity_id.not_nil!.empty?
 
       if audiences.empty?
@@ -701,7 +701,7 @@ module Saml
     # @return [Boolean] True if there is a conditions element and is unique
     #
     private def validate_one_conditions
-      return true if options[:skip_conditions]
+      return true if options[:skip_conditions]?
 
       conditions_nodes = xpath_from_signed_assertion("/a:Conditions") || [] of XML::NodeSet
       unless conditions_nodes.size == 1
@@ -717,7 +717,7 @@ module Saml
     # @return [Boolean] True if there is a authnstatement element and is unique
     #
     private def validate_one_authnstatement
-      return true if options[:skip_authnstatement]
+      return true if options[:skip_authnstatement]?
 
       authnstatement_nodes = xpath_from_signed_assertion("/a:AuthnStatement") || [] of XML::Node
       unless authnstatement_nodes.size == 1
@@ -735,7 +735,7 @@ module Saml
     #
     private def validate_conditions
       return true if conditions.nil?
-      return true if options[:skip_conditions]
+      return true if options[:skip_conditions]?
 
       now = Time.utc
 
@@ -804,7 +804,7 @@ module Saml
     # @raise [ValidationError] if soft == false and validation fails
     #
     private def validate_subject_confirmation
-      return true if options[:skip_subject_confirmation]
+      return true if options[:skip_subject_confirmation]?
       valid_subject_confirmation = false
 
       if subject_confirmation_nodes = xpath_from_signed_assertion("/a:Subject/a:SubjectConfirmation")
@@ -843,7 +843,7 @@ module Saml
     # Validates the NameID element
     private def validate_name_id
       if name_id_node.nil?
-        if settings.security[:want_name_id]
+        if settings.security[:want_name_id]?
           return append_error("No NameID element found in the assertion of the Response")
         end
       else
@@ -1002,8 +1002,6 @@ module Saml
           { "id" => doc.signed_element_id }
         )
 
-        puts "NODES COUNT: #{nodes.size}"
-
         more_nodes = doc.xpath_nodes(
           "/p:Response[@ID=$id]/a:Assertion#{subelt}",
           { "p" => PROTOCOL, "a" => ASSERTION },
@@ -1014,7 +1012,6 @@ module Saml
           nodes << node
         end
 
-        puts "MORE NODES COUNT: #{more_nodes.size}.... FINAL NODES COUNT: #{nodes.size}"
         nodes
       end
     end

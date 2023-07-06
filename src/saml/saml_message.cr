@@ -86,9 +86,10 @@ module Saml
 
       decoded = decode(saml)
       begin
-        inflate(decoded)
-      rescue
-        decoded
+        inflate(decoded).to_s
+      rescue ex
+        puts "Error while inflate: #{ex.inspect_with_backtrace}"
+        decoded.to_s
       end
     end
 
@@ -105,10 +106,10 @@ module Saml
 
     # Base 64 decode method
     # @param string [String] The string message
-    # @return [String] The decoded string
+    # @return [Bytes] The decoded string
     #
     private def decode(string)
-      Base64.decode_string(string)
+      Base64.decode(string)
     end
 
     # Base 64 encode method
@@ -132,8 +133,12 @@ module Saml
     # @return [String] The inflated string
     #
     private def inflate(deflated)
-      Compress::Zlib::Reader.open(IO::Memory.new(deflated)) do |reader|
-        reader.gets_to_end
+      begin
+        SamlZlibReader.open(IO::Memory.new(deflated)) do |reader|
+          reader.gets_to_end
+        end
+      rescue
+        deflated
       end
     end
 

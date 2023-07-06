@@ -95,80 +95,82 @@ module Saml
     def create_xml_document(settings)
       time = Time.utc.to_s("%Y-%m-%dT%H:%M:%SZ")
 
-      request_doc = XMLSecurity::Document.new("")
-      request_doc.uuid = uuid
+      request_doc = XMLSecurity::Document.new("samlp:AuthnRequest", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" })
+      if root = request_doc.root
+        request_doc.uuid = uuid
 
-      root = request_doc.add_element "samlp:AuthnRequest", { "xmlns:samlp" => "urn:oasis:names:tc:SAML:2.0:protocol", "xmlns:saml" => "urn:oasis:names:tc:SAML:2.0:assertion" }
-      root["ID"] = uuid
-      root["IssueInstant"] = time
-      root["Version"] = "2.0"
-      root["Destination"] = settings.idp_sso_service_url if settings.idp_sso_service_url.presence
-      root["IsPassive"] = settings.passive unless settings.passive.nil?
-      root["ProtocolBinding"] = settings.protocol_binding unless settings.protocol_binding.nil?
-      root["AttributeConsumingServiceIndex"] = settings.attributes_index unless settings.attributes_index.nil?
-      root["ForceAuthn"] = settings.force_authn unless settings.force_authn.nil?
 
-      # Conditionally defined elements based on settings
-      if settings.assertion_consumer_service_url != nil
-        root.attributes["AssertionConsumerServiceURL"] = settings.assertion_consumer_service_url
-      end
-      if sp_entity_id = settings.sp_entity_id
-        issuer = root.add_element "saml:Issuer"
-        issuer.text = sp_entity_id
-      end
+        root["ID"] = uuid
+        root["IssueInstant"] = time
+        root["Version"] = "2.0"
+        root["Destination"] = settings.idp_sso_service_url if settings.idp_sso_service_url.presence
+        root["IsPassive"] = settings.passive unless settings.passive.nil?
+        root["ProtocolBinding"] = settings.protocol_binding unless settings.protocol_binding.nil?
+        root["AttributeConsumingServiceIndex"] = settings.attributes_index unless settings.attributes_index.nil?
+        root["ForceAuthn"] = settings.force_authn unless settings.force_authn.nil?
 
-      if name_identifier_value_requested = settings.name_identifier_value_requested
-        subject = root.add_element "saml:Subject"
-
-        nameid = subject.add_element "saml:NameID"
-        nameid.attributes["Format"] = settings.name_identifier_format if settings.name_identifier_format
-        nameid.text = name_identifier_value_requested
-
-        subject_confirmation = subject.add_element "saml:SubjectConfirmation"
-        subject_confirmation.attributes["Method"] = "urn:oasis:names:tc:SAML:2.0:cm:bearer"
-      end
-
-      if settings.name_identifier_format != nil
-        root.add_element "samlp:NameIDPolicy", {
-          # Might want to make AllowCreate a setting?
-          "AllowCreate" => "true",
-          "Format" => settings.name_identifier_format,
-        }
-      end
-
-      if settings.authn_context || settings.authn_context_decl_ref
-        if settings.authn_context_comparison != nil
-          comparison = settings.authn_context_comparison
-        else
-          comparison = "exact"
+        # Conditionally defined elements based on settings
+        if settings.assertion_consumer_service_url != nil
+          root.attributes["AssertionConsumerServiceURL"] = settings.assertion_consumer_service_url
+        end
+        if sp_entity_id = settings.sp_entity_id
+          issuer = root.add_element "saml:Issuer"
+          issuer.text = sp_entity_id
         end
 
-        requested_context = root.add_element "samlp:RequestedAuthnContext", {
-          "Comparison" => comparison,
-        }
+        if name_identifier_value_requested = settings.name_identifier_value_requested
+          subject = root.add_element "saml:Subject"
 
-        authn_contexts_class_refs = case authn_context = settings.authn_context
-        when String
-          [authn_context]
-        when Array(String)
-          authn_context
+          nameid = subject.add_element "saml:NameID"
+          nameid.attributes["Format"] = settings.name_identifier_format if settings.name_identifier_format
+          nameid.text = name_identifier_value_requested
+
+          subject_confirmation = subject.add_element "saml:SubjectConfirmation"
+          subject_confirmation.attributes["Method"] = "urn:oasis:names:tc:SAML:2.0:cm:bearer"
         end
 
-        if authn_contexts_class_refs
-          authn_contexts_class_refs.each do |authn_context_class_ref|
-            if class_ref = requested_context.add_element( "saml:AuthnContextClassRef" )
-              if val = authn_context_class_ref.as?(String)
-                class_ref.text = val
+        if settings.name_identifier_format != nil
+          root.add_element "samlp:NameIDPolicy", {
+            # Might want to make AllowCreate a setting?
+            "AllowCreate" => "true",
+            "Format" => settings.name_identifier_format,
+          }
+        end
+
+        if settings.authn_context || settings.authn_context_decl_ref
+          if settings.authn_context_comparison != nil
+            comparison = settings.authn_context_comparison
+          else
+            comparison = "exact"
+          end
+
+          requested_context = root.add_element "samlp:RequestedAuthnContext", {
+            "Comparison" => comparison,
+          }
+
+          authn_contexts_class_refs = case authn_context = settings.authn_context
+          when String
+            [authn_context]
+          when Array(String)
+            authn_context
+          end
+
+          if authn_contexts_class_refs
+            authn_contexts_class_refs.each do |authn_context_class_ref|
+              if class_ref = requested_context.add_element( "saml:AuthnContextClassRef" )
+                if val = authn_context_class_ref.as?(String)
+                  class_ref.text = val
+                end
               end
             end
           end
-        end
 
-        if settings.authn_context_decl_ref != nil
-          authn_contexts_decl_refs = settings.authn_context_decl_ref.is_a?(Array(String)) ? settings.authn_context_decl_ref.as(Array(String)) : [settings.authn_context_decl_ref]
-          authn_contexts_decl_refs.each do |authn_context_decl_ref|
-            decl_ref = requested_context.add_element "saml:AuthnContextDeclRef"
-            decl_ref.text = authn_context_decl_ref if authn_context_decl_ref
+          if settings.authn_context_decl_ref != nil
+            authn_contexts_decl_refs = settings.authn_context_decl_ref.is_a?(Array(String)) ? settings.authn_context_decl_ref.as(Array(String)) : [settings.authn_context_decl_ref]
+            authn_contexts_decl_refs.each do |authn_context_decl_ref|
+              decl_ref = requested_context.add_element "saml:AuthnContextDeclRef"
+              decl_ref.text = authn_context_decl_ref if authn_context_decl_ref
+            end
           end
         end
       end

@@ -7,6 +7,7 @@ class Minitest::Test
   @response_document_without_attributes : String?
   @response_document_without_recipient : String?
   @response_document_valid_signed_without_x509certificate : String?
+  @crystal_saml_cert_fingerprint : String?
 
   def fixture(document, base64 = true)
     response = Dir.glob(File.join(File.dirname(__FILE__), "responses", "#{document}*")).first
@@ -246,7 +247,8 @@ class Minitest::Test
   end
 
   def crystal_saml_cert_fingerprint
-    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(crystal_saml_cert.public_key.to_der).scan(/../).join(":")
+    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(crystal_saml_cert.public_key.to_der).scan(/../).map{|r|r[0]}.join(":")
+    @crystal_saml_cert_fingerprint.not_nil!
   end
 
   def crystal_saml_cert_text
