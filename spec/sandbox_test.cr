@@ -49,6 +49,8 @@ describe "XmlSecurity" do
       logout_request = Saml::Logoutrequest.new.create_logout_request_xml_doc(settings)
       logout_request.sign_document(crystal_saml_key, crystal_saml_cert)
 
+#puts "\n\n\nLOGOUT REQUEST: #{logout_request.to_s}\n\n\n"
+
       #verify our signature
       signed_doc = XMLSecurity::SignedDocument.new(logout_request.to_s)
       assert signed_doc.validate_document(crystal_saml_cert_fingerprint, false)

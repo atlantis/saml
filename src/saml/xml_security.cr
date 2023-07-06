@@ -132,33 +132,6 @@ module XMLSecurity
       # to_xml must avoid formatting
       noko = XML.parse(self.to_xml(options: XML::SaveOptions::AS_XML), XML_PARSER_OPTIONS)
 
-      # signature_element = XML.build_fragment do |xml|
-      #   xml.element("ds", "Signature", DSIG, {} of String => String) do
-      #     xml.element("ds:SignedInfo") do
-      #       xml.element("ds:CanonicalizationMethod", { "Algorithm" => C14N })
-      #       xml.element("ds:SignatureMethod", { "Algorithm" => signature_method })
-
-      #       # Add Reference
-      #       xml.element("ds:Reference", { "URI" => "##{uuid}" }) do
-      #         xml.element("ds:Transforms") do
-      #           xml.element("ds:Transform", { "Algorithm" => ENVELOPED_SIG })
-      #           xml.element("ds:Transform", { "Algorithm" => C14N }) do
-      #             xml.element("ec:InclusiveNamespaces", { "xmlns:ec" => C14N, "PrefixList" => INC_PREFIX_LIST })
-      #           end
-      #         end
-
-      #         xml.element("ds:DigestMethod", { "Algorithm" => digest_method })
-
-      #         inclusive_namespaces = INC_PREFIX_LIST.split(" ")
-      #         canon_doc = noko.canonicalize(mode: BaseDocument.canon_algorithm(C14N), inclusive_ns: inclusive_namespaces)
-      #         xml.element("ds:DigestValue") do
-      #           xml.text compute_digest(canon_doc, BaseDocument.algorithm(digest_method.to_s))
-      #         end
-      #       end
-      #     end
-      #   end
-      # end
-
       inclusive_namespaces = INC_PREFIX_LIST.split(" ")
 
       canon_doc = noko.canonicalize(mode: BaseDocument.canon_algorithm(C14N), inclusive_ns: inclusive_namespaces)
@@ -181,11 +154,14 @@ module XMLSecurity
 
       reference_element.add_element("ds:DigestValue").text = compute_digest(canon_doc, BaseDocument.algorithm(digest_method_element))
 
-      # add SignatureValue
-      noko_sig_element = XML.parse(signature_element.to_s, XML_PARSER_OPTIONS)
+      # add SignatureValue - to_xml must avoid formatting
+      noko_sig_element = XML.parse(signature_element.to_xml(options: XML::SaveOptions::AS_XML), XML_PARSER_OPTIONS)
 
-      noko_signed_info_element = noko_sig_element.xpath_node("//ds:Signature/ds:SignedInfo", {"ds" => DSIG})
-      canon_string = noko_signed_info_element.not_nil!.canonicalize(mode: BaseDocument.canon_algorithm(C14N))
+      if noko_signed_info_element = noko_sig_element.xpath_node("//ds:Signature/ds:SignedInfo", {"ds" => DSIG})
+        canon_string = noko_signed_info_element.parent.not_nil!.canonicalize(mode: BaseDocument.canon_algorithm(C14N))
+      else
+        raise "No SignedInfo found in document"
+      end
 
       signature = compute_signature(private_key, BaseDocument.algorithm(signature_method), canon_string)
       signature_element.add_element("ds:SignatureValue").text = signature
@@ -358,7 +334,7 @@ module XMLSecurity
         # get signature
         signature = if base64_signature = sig_element.try(&.xpath_node("./ds:SignatureValue",{ "ds" => DSIG }))
           if scrubbed_text = Saml::Utils.element_text(base64_signature)
-            Base64.decode_string(scrubbed_text)
+            Base64.decode(scrubbed_text)
           end
         end
 
@@ -436,9 +412,6 @@ module XMLSecurity
         unless cert = load_cert(base64_cert)
           return append_error("Couldn't load X509 certificate", soft)
         end
-
-puts "signature: #{signature}\n\n"
-puts "Cannon string\n#{canon_string}"
 
         # verify signature
         unless cert.public_key.verify(digest: signature_algorithm, signature: signature, data: canon_string)
