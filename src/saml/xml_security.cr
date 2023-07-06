@@ -263,7 +263,7 @@ module XMLSecurity
         if base64_cert = Saml::Utils.element_text(cert_element)
           cert_text = Base64.decode_string(base64_cert)
           cert_content_from_document = if cert = load_cert(cert_text)
-            pem_to_der( cert.to_pem ).gsub("\n", "")
+            cert.to_pem.gsub("-----BEGIN CERTIFICATE-----", "").gsub("-----END CERTIFICATE-----", "").gsub("\n", "")
           else
             base64_cert
           end
