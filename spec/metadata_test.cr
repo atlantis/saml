@@ -75,7 +75,7 @@ class MetadataTest < Minitest::Test
     end
 
     it "generates Service Provider Metadata with ValidUntil and CacheDuration" do
-      valid_until = Time.now + 172800
+      valid_until = Time.utc + 172800.seconds
       cache_duration = 604800
       xml_metadata = Saml::Metadata.new.generate(settings, false, valid_until, cache_duration)
       start = "<?xml version='1.0' encoding='UTF-8'?><md:EntityDescriptor"

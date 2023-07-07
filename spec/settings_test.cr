@@ -220,7 +220,7 @@ class SettingsTest < Minitest::Test
       end
 
       it "returns nil when the idp_cert_multi is nil or empty" do
-        @settings.idp_cert_multi = nil
+        @settings.idp_cert_multi = {} of Symbol => Array(String)
         assert_nil @settings.get_idp_cert_multi
       end
 

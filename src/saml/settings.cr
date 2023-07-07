@@ -104,7 +104,7 @@ module Saml
         when :single_logout_service_binding
           self.single_logout_service_binding = v.as?(String)
         when :idp_cert_fingerprint
-          self.idp_cert_fingerprint = v.as?(String)
+          self.idp_cert_fingerprint_algorithm = v.as?(String)
         when :idp_cert_fingerprint_algorithm
           self.idp_cert_fingerprint_algorithm = v.as?(String)
         when :compress_request
@@ -237,9 +237,7 @@ module Saml
     # @return [Hash with 2 arrays of OpenSSL::X509::Certificate] Build multiple IdP certificates from the settings.
     #
     def get_idp_cert_multi
-      return nil if idp_cert_multi.nil? || idp_cert_multi.empty?
-
-      raise ArgumentError.new("Invalid value for idp_cert_multi") if !idp_cert_multi.is_a?(Hash)
+      return nil if idp_cert_multi.empty?
 
       certs = { :signing => [] of OpenSSL::X509::Certificate, :encryption => [] of OpenSSL::X509::Certificate }
 

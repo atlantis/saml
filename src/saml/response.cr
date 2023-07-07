@@ -4,7 +4,7 @@ module Saml
   # SAML2 Authentication Response. SAML Response
   #
   class Response < SamlMessage
-    alias OptionValue = String | Bool | Float32 | Int32
+    alias OptionValue = String | Bool | Float32 | Int32 | Time::Span | Settings
     include ErrorHandling
 
     ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion"
@@ -64,12 +64,11 @@ module Saml
     #                          or skip the recipient validation of the subject confirmation element with :skip_recipient_check option
     #                          or skip the audience validation with :skip_audience option
     #
-    def initialize(response, options = {} of Symbol => OptionValue)
+    def initialize(response, @options = {} of Symbol => OptionValue)
       raise ArgumentError.new("Response cannot be nil") if response.nil?
 
       @error_messages = [] of String
 
-      @options = options.as(Hash(Symbol, OptionValue))
       @soft = true
       @settings = options[:settings]?.as?(Saml::Settings) || Saml::Settings.new
       if settings = @settings
@@ -147,8 +146,9 @@ module Saml
     #
     def sessionindex
       @sessionindex ||= begin
-        node = xpath_first_from_signed_assertion("/a:AuthnStatement")
-        node.nil? ? nil : node.attributes["SessionIndex"]
+        if node = xpath_first_from_signed_assertion("/a:AuthnStatement")
+          node["SessionIndex"]
+        end
       end
     end
 

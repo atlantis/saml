@@ -11,6 +11,12 @@ class Minitest::Test
   @response_document_with_signed_assertion : String?
   @response_document_valid_signed : String?
   @response_document_unsigned : String?
+  @response_document_with_saml2_namespace : String?
+  @response_document_with_ds_namespace_at_the_root : String?
+  @signature1 : String?
+  @response_document_wrapped : String?
+  @response_document_without_reference_uri : String?
+  @ampersands_response : String?
 
   def fixture(document, base64 = true)
     response = Dir.glob(File.join(File.dirname(__FILE__), "responses", "#{document}*")).first
@@ -50,9 +56,9 @@ class Minitest::Test
   end
 
   def response_document_without_recipient_with_time_updated
-    doc = Base64.decode(response_document_without_recipient)
-    doc.gsub!(/NotBefore=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotBefore=\"#{(Time.utc - 300.seconds).to_s("%Y-%m-%dT%XZ")}\"")
-    doc.gsub!(/NotOnOrAfter=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotOnOrAfter=\"#{(Time.utc + 300.seconds).to_s("%Y-%m-%dT%XZ")}\"")
+    doc = Base64.decode_string(response_document_without_recipient)
+    doc = doc.gsub(/NotBefore=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotBefore=\"#{(Time.utc - 300.seconds).to_s("%Y-%m-%dT%XZ")}\"")
+    doc = doc.gsub(/NotOnOrAfter=\"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z\"/, "NotOnOrAfter=\"#{(Time.utc + 300.seconds).to_s("%Y-%m-%dT%XZ")}\"")
     Base64.encode(doc)
   end
 
