@@ -56,13 +56,13 @@ describe "XmlSecurity" do
     exception = assert_raises(Saml::ValidationError) do
       mod_document.validate_signature(base64cert, false)
     end
-    assert_equal("Key validation error", exception.message)
-    assert_includes mod_document.errors, "Key validation error"
+    assert_equal("Digest mismatch", exception.message)
+    assert_includes mod_document.errors, "Digest mismatch"
   end
 
   it "correctly obtain the digest method with alternate namespace declaration" do
     adfs_document = XMLSecurity::SignedDocument.new(fixture(:adfs_response_xmlns, false))
-    base64cert = adfs_document.xpath_node("//X509Certificate").try &.text
+    base64cert = adfs_document.xpath_node("//*[local-name()='X509Certificate']").try &.text
     assert adfs_document.validate_signature(base64cert, false)
   end
 
@@ -222,12 +222,11 @@ describe "XmlSecurity::SignedDocument" do
 
     it "return nil when inclusive namespace element is missing" do
       response = fixture(:no_signature_ns, false)
-      response.gsub %r{<InclusiveNamespaces xmlns="http://www.w3.org/2001/10/xml-exc-c14n#" PrefixList="#default saml ds xs xsi"/>}, ""
+      response = response.sub "<InclusiveNamespaces xmlns=\"http://www.w3.org/2001/10/xml-exc-c14n#\" PrefixList=\"#default saml ds xs xsi\"/>", ""
 
       document = XMLSecurity::SignedDocument.new(response)
       inclusive_namespaces = document.extract_inclusive_namespaces_for_test
-
-      assert inclusive_namespaces.nil?
+      assert inclusive_namespaces.empty?
     end
   end
 

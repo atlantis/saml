@@ -245,7 +245,7 @@ module XMLSecurity
 
     def validate_document(idp_cert_fingerprint, soft = true, options = {} of Symbol => String | OpenSSL::X509::Certificate)
       # get cert from response
-      if cert_element = self.xpath_node("//ds:X509Certificate", { "ds" => DSIG })
+      if cert_element = self.xpath_node("//*[local-name()='X509Certificate']")
         if base64_cert = Saml::Utils.element_text(cert_element)
           #cert_text = Base64.decode_string(base64_cert)
           unless cert = load_cert(base64_cert)
