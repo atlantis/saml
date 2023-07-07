@@ -219,7 +219,7 @@ module Saml
           if algo = idp_cert_fingerprint_algorithm
             fingerprint_alg = XMLSecurity::BaseDocument.algorithm(algo)
             fingerprint_alg << idp_cert.public_key.to_der
-            fingerprint_alg.hexfinal.upcase.scan(/../).join(":")
+            fingerprint_alg.hexfinal.upcase.scan(/../).map{|r|r[0]}.join(":")
           end
         end
       end
@@ -288,9 +288,14 @@ module Saml
     # @return [OpenSSL::PKey::RSA] Build the SP private from the settings (previously format it)
     #
     def get_sp_key
+      if key = self.get_sp_key_text
+        OpenSSL::PKey::RSA.new(key)
+      end
+    end
+
+    def get_sp_key_text
       if key = self.private_key
-        formatted_private_key = Saml::Utils.format_private_key(key)
-        OpenSSL::PKey::RSA.new(formatted_private_key)
+        Saml::Utils.format_private_key(key)
       end
     end
 

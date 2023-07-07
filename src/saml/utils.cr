@@ -87,7 +87,7 @@ module Saml
       if cert.scan(/BEGIN CERTIFICATE/).size > 1
         formatted_cert = [] of String
         cert.scan(/-{5}BEGIN CERTIFICATE-{5}[\n\r]?.*?-{5}END CERTIFICATE-{5}[\n\r]?/m) { |c|
-          formatted_cert << format_cert(c.string)
+          formatted_cert << format_cert(c[0])
         }
         formatted_cert.join("\n")
       else
@@ -95,7 +95,7 @@ module Saml
         cert = cert.gsub(/\r/, "")
         cert = cert.gsub(/\n/, "")
         cert = cert.gsub(/\s/, "")
-        cert = cert.scan(/.{1,64}/)
+        cert = cert.scan(/.{1,64}/).map{|r|r[0]}
         cert = cert.join("\n")
         "-----BEGIN CERTIFICATE-----\n#{cert}\n-----END CERTIFICATE-----"
       end
@@ -116,7 +116,7 @@ module Saml
       key = key.gsub(/\n/, "")
       key = key.gsub(/\r/, "")
       key = key.gsub(/\s/, "")
-      key = key.scan(/.{1,64}/)
+      key = key.scan(/.{1,64}/).map{|r|r[0]}
       key = key.join("\n")
       key_label = rsa_key ? "RSA PRIVATE KEY" : "PRIVATE KEY"
       "-----BEGIN #{key_label}-----\n#{key}\n-----END #{key_label}-----"
@@ -245,7 +245,7 @@ module Saml
             { "xenc" => XENC }
           )
           if et = element_text(cipher_value)
-            node = Base64.decode_string(et)
+            node = Base64.decode(et)
             if encrypt_method = encrypt_data.xpath_node(
                 "./xenc:EncryptionMethod",
                 { "xenc" => XENC }
@@ -277,14 +277,13 @@ module Saml
         )
 
         if et = element_text(encrypted_symmetric_key_element)
-          cipher_text = Base64.decode_string(et)
-
+          cipher_text = Base64.decode(et)
           if encrypt_method = encrypted_key.xpath_node(
               "./xenc:EncryptionMethod",
               {"xenc" => XENC},
             )
 
-            algorithm = encrypt_method.attributes["Algorithm"]
+            algorithm = encrypt_method["Algorithm"]
             return retrieve_plaintext(cipher_text, private_key, algorithm)
           end
         end
@@ -294,7 +293,7 @@ module Saml
     end
 
     def self.retrieve_symetric_key_reference(encrypt_data : XML::Node)
-      encrypt_data.xpath_node(
+      encrypt_data.xpath_string(
         "substring-after(./ds:KeyInfo/ds:RetrievalMethod/@URI, '#')",
         { "ds" => DSIG }
       )
@@ -305,15 +304,15 @@ module Saml
     # @param symmetric_key [String] The symetric key used to encrypt the text
     # @param algorithm [String]     The encrypted algorithm
     # @return [String] The deciphered text
-    def self.retrieve_plaintext(cipher_text, symmetric_key : OpenSSL::PKey::RSA | String | Nil, algorithm)
+    def self.retrieve_plaintext(cipher_text, symmetric_key : String | Slice(UInt8) | Nil, algorithm)
       case algorithm
-      when "http://www.w3.org/2001/04/xmlenc#tripledes-cbc" then cipher = OpenSSL::Cipher.new("DES-EDE3-CBC").decrypt
-      when "http://www.w3.org/2001/04/xmlenc#aes128-cbc" then cipher = OpenSSL::Cipher.new("AES-128-CBC").decrypt
-      when "http://www.w3.org/2001/04/xmlenc#aes192-cbc" then cipher = OpenSSL::Cipher.new("AES-192-CBC").decrypt
-      when "http://www.w3.org/2001/04/xmlenc#aes256-cbc" then cipher = OpenSSL::Cipher.new("AES-256-CBC").decrypt
-      when "http://www.w3.org/2009/xmlenc11#aes128-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-128-GCM").decrypt
-      when "http://www.w3.org/2009/xmlenc11#aes192-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-192-GCM").decrypt
-      when "http://www.w3.org/2009/xmlenc11#aes256-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-256-GCM").decrypt
+      when "http://www.w3.org/2001/04/xmlenc#tripledes-cbc" then cipher = OpenSSL::Cipher.new("DES-EDE3-CBC")
+      when "http://www.w3.org/2001/04/xmlenc#aes128-cbc" then cipher = OpenSSL::Cipher.new("AES-128-CBC")
+      when "http://www.w3.org/2001/04/xmlenc#aes192-cbc" then cipher = OpenSSL::Cipher.new("AES-192-CBC")
+      when "http://www.w3.org/2001/04/xmlenc#aes256-cbc" then cipher = OpenSSL::Cipher.new("AES-256-CBC")
+      when "http://www.w3.org/2009/xmlenc11#aes128-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-128-GCM")
+      when "http://www.w3.org/2009/xmlenc11#aes192-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-192-GCM")
+      when "http://www.w3.org/2009/xmlenc11#aes256-gcm" then auth_cipher = OpenSSL::Cipher.new("AES-256-GCM")
       when "http://www.w3.org/2001/04/xmlenc#rsa-1_5"
         case symmetric_key
         when OpenSSL::PKey::RSA
@@ -321,31 +320,58 @@ module Saml
         when String
           rsa = OpenSSL::PKey::RSA.new(symmetric_key)
         end
-      when "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p" then oaep = symmetric_key
+      when "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"
+        case symmetric_key
+        when String
+          oaep = OpenSSL::PKey::RSA.new(symmetric_key)
+        end
+      end
+
+      #put it in decrypt mode
+      if c = (cipher || auth_cipher).as?(OpenSSL::Cipher)
+        c.decrypt
       end
 
       if cipher
-        iv_len = cipher.iv_len
-        data = cipher_text[iv_len..-1]
-        cipher.padding, cipher.key, cipher.iv = 0, symmetric_key, cipher_text[0..iv_len - 1]
-        assertion_plaintext = cipher.update(data)
-        assertion_plaintext << cipher.final
+        if key = symmetric_key
+          iv_len = cipher.iv_len
+          data = cipher_text[iv_len..-1]
+          cipher.padding, cipher.key, cipher.iv = false, key, cipher_text[0..iv_len - 1]
+
+          io = IO::Memory.new
+          io.write(cipher.update(data))
+          io.write(cipher.final)
+          io.rewind
+
+          io.gets_to_end
+        else
+          return nil
+        end
       elsif auth_cipher
-        iv_len, text_len, tag_len = auth_cipher.iv_len, cipher_text.size, 16
-        data = cipher_text[iv_len..text_len - 1 - tag_len]
-        auth_cipher.padding = 0
-        auth_cipher.key = symmetric_key
-        auth_cipher.iv = cipher_text[0..iv_len - 1]
-        auth_cipher.auth_data = ""
-        auth_cipher.auth_tag = cipher_text[text_len - tag_len..-1]
-        assertion_plaintext = auth_cipher.update(data)
-        assertion_plaintext << auth_cipher.final
+        if key = symmetric_key
+          iv_len, text_len, tag_len = auth_cipher.iv_len, cipher_text.size, 16
+          data = cipher_text[iv_len..text_len - 1 - tag_len]
+          auth_cipher.padding = false
+          auth_cipher.key = key
+          auth_cipher.iv = cipher_text[0..iv_len - 1]
+          # auth_cipher.auth_data = ""
+          # auth_cipher.auth_tag = cipher_text[text_len - tag_len..-1]
+          io = IO::Memory.new
+          io.write(auth_cipher.update(data))
+          io.write(auth_cipher.final)
+          io.rewind
+
+          io.gets_to_end
+        else
+          return nil
+        end
       elsif rsa
-        rsa.private_decrypt(cipher_text).try(&.to_s)
+        rsa.private_decrypt(cipher_text)
       elsif oaep.is_a?(OpenSSL::PKey::RSA)
-        oaep.private_decrypt(cipher_text, LibCrypto::Padding::PKCS1_OAEP_PADDING).try(&.to_s)
+        oaep.private_decrypt(cipher_text, LibCrypto::Padding::PKCS1_OAEP_PADDING)
       else
-        cipher_text
+        # epic fail return nil
+        nil
       end
     end
 
@@ -374,7 +400,7 @@ module Saml
           dest_uri.path == acs_uri.path &&
           dest_uri.query == acs_uri.query
       end
-    rescue : URI::Error
+    rescue err : URI::Error
       original_uri_match?(destination_url, settings_url)
     end
 

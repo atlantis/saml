@@ -366,7 +366,7 @@ module Saml
           cert = OpenSSL::X509::Certificate.new(Base64.decode(certificate))
 
           fingerprint_alg = XMLSecurity::BaseDocument.new.algorithm(fingerprint_algorithm).new
-          fingerprint_alg.hexdigest(cert.to_der).upcase.scan(/../).join(":")
+          fingerprint_alg.hexdigest(cert.to_der).upcase.scan(/../).map{|r|r[0]}.join(":")
         end
       end
 

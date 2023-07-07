@@ -471,7 +471,10 @@ module XMLSecurity
 
       return nil if reference_element.nil?
 
-      sei = reference_element["URI"][1..-1]
+      if (sei = reference_element["URI"]) && sei.size > 0
+        sei = sei[1..-1]
+      end
+
       if sei.nil?
         if node = reference_element.parent.try(&.parent).try(&.parent)
           if id = node["ID"]

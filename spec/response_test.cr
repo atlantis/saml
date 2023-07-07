@@ -39,6 +39,10 @@ module Saml
         self.validate_conditions
       when :validate_no_duplicated_attributes
         self.validate_no_duplicated_attributes
+      when :validate_one_conditions
+        self.validate_one_conditions
+      else
+        raise "Missing .send hack for method #{method}"
       end
     end
   end
@@ -194,7 +198,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "receives the full AttributeValue when there is an injected comment" do
-        assert_equal "smith", @response.not_nil!.attributes["surname"]
+        assert_equal "smith", @response.not_nil!.attributes["surname"].first
       end
     end
 
@@ -740,10 +744,13 @@ class RubySamlTest < Minitest::Test
 
     describe "validate_formatted_x509_certificate" do
       let(:response_with_formatted_x509certificate) {
-        Saml::Response.new(read_response("valid_response_with_formatted_x509certificate.xml.base64"), {
-          :skip_conditions => true,
-          :skip_subject_confirmation => true,
-        })
+        Saml::Response.new(
+          read_response("valid_response_with_formatted_x509certificate.xml.base64"),
+          {
+            :skip_conditions => true,
+            :skip_subject_confirmation => true,
+          }
+        )
       }
 
       it "be able to parse the response wihout errors" do
@@ -756,13 +763,13 @@ class RubySamlTest < Minitest::Test
 
     describe "#validate_in_response_to" do
       it "return true when the inResponseTo value matches the Request ID" do
-        response = Saml::Response.new(response_document_valid_signed, {:settings => settings, :matches_request_id => "_fc4a34b0-7efb-012e-caae-782bcb13bb38"}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(response_document_valid_signed, {:settings => settings, :matches_request_id => "_fc4a34b0-7efb-012e-caae-782bcb13bb38"})
         assert response.send(:validate_in_response_to)
         assert_empty response.errors
       end
 
       it "return true when no Request ID is provided for checking" do
-        response = Saml::Response.new(response_document_valid_signed, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(response_document_valid_signed, {:settings => settings})
         assert response.send(:validate_in_response_to)
         assert_empty response.errors
       end
@@ -1275,16 +1282,17 @@ class RubySamlTest < Minitest::Test
 
     describe "#attributes" do
       it "extract the first attribute in a hash accessed via its symbol" do
-        assert_equal "demo", response.attributes[:uid]
+        assert_equal "demo", response.attributes[:uid].first
       end
 
       it "extract the first attribute in a hash accessed via its name" do
-        assert_equal "demo", response.attributes["uid"]
+        assert_equal "demo", response.attributes["uid"].first
       end
 
       it "extract all attributes" do
-        assert_equal "demo", response.attributes[:uid]
-        assert_equal "value", response.attributes[:another_value]
+        puts "ATTRS: #{response.attributes.inspect}"
+        assert_equal "demo", response.attributes[:uid].first
+        assert_equal "value", response.attributes[:another_value].first
       end
 
       it "work for implicit namespaces" do
@@ -1380,17 +1388,9 @@ class RubySamlTest < Minitest::Test
           assert_nil response_multiple_attr_values.attributes[:attribute_with_nil_value]
         end
 
-        it "return nil value correctly when not in compatibility mode off" do
-          assert_equal [nil], response_multiple_attr_values.attributes[:attribute_with_nil_value]
-        end
-
         it "return multiple values including nil and empty string" do
           response = Saml::Response.new(fixture(:response_with_multiple_attribute_values))
           assert_equal ["", "valuePresent", nil, nil], response.attributes.multi(:attribute_with_nils_and_empty_strings)
-        end
-
-        it "return multiple values from [] when not in compatibility mode off" do
-          assert_equal ["", "valuePresent", nil, nil], response_multiple_attr_values.attributes[:attribute_with_nils_and_empty_strings]
         end
 
         it "check what happens when trying retrieve attribute that does not exists" do
@@ -1466,8 +1466,8 @@ class RubySamlTest < Minitest::Test
     describe "#want_assertion_signed" do
       before do
         settings.security[:want_assertions_signed] = true
-        @signed_assertion = Saml::Response.new(response_document_with_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
-        @no_signed_assertion = Saml::Response.new(response_document_valid_signed, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        @signed_assertion = Saml::Response.new(response_document_with_signed_assertion, {:settings => settings})
+        @no_signed_assertion = Saml::Response.new(response_document_valid_signed, {:settings => settings})
       end
 
       it "returns false if want_assertion_signed enabled and Assertion not signed" do
@@ -1515,7 +1515,7 @@ class RubySamlTest < Minitest::Test
         end
 
         assert_raises(Saml::ValidationError, error_msg) do
-          Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
         end
 
         settings.certificate = crystal_saml_cert_text
@@ -1533,27 +1533,27 @@ class RubySamlTest < Minitest::Test
 
         error_msg = "Neither PUB key nor PRIV key: nested asn1 error"
         assert_raises(Exception, error_msg) do
-          Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
         end
       end
 
       it "return true if an encrypted assertion is found and settings initialized with private_key" do
         settings.certificate = crystal_saml_cert_text
         settings.private_key = crystal_saml_key_text
-        response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
         assert response.decrypted_document
 
-        response2 = Saml::Response.new(signed_message_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response2 = Saml::Response.new(signed_message_encrypted_signed_assertion, {:settings => settings})
         assert response2.decrypted_document
 
-        response3 = Saml::Response.new(unsigned_message_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response3 = Saml::Response.new(unsigned_message_encrypted_signed_assertion, {:settings => settings})
         assert response3.decrypted_document
 
-        response4 = Saml::Response.new(unsigned_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response4 = Saml::Response.new(unsigned_message_encrypted_unsigned_assertion, {:settings => settings})
         assert response4.decrypted_document
 
         assert Saml::Response.new(
-          Base64.encode(File.read("test/responses/unsigned_encrypted_adfs.xml")),
+          Base64.encode(File.read("spec/responses/unsigned_encrypted_adfs.xml")),
           {:settings => settings,}
         ).decrypted_document
       end
@@ -1569,7 +1569,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "is possible when signed_message_encrypted_unsigned_assertion" do
-        response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert response.is_valid?
           assert_empty response.errors
@@ -1579,7 +1579,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "is possible when signed_message_encrypted_signed_assertion" do
-        response = Saml::Response.new(signed_message_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(signed_message_encrypted_signed_assertion, {:settings => settings})
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert response.is_valid?
           assert_empty response.errors
@@ -1589,7 +1589,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "is possible when unsigned_message_encrypted_signed_assertion" do
-        response = Saml::Response.new(unsigned_message_encrypted_signed_assertion,{ :settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(unsigned_message_encrypted_signed_assertion,{ :settings => settings})
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert response.is_valid?
           assert_empty response.errors
@@ -1599,7 +1599,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "is not possible when unsigned_message_encrypted_unsigned_assertion" do
-        response = Saml::Response.new(unsigned_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(unsigned_message_encrypted_unsigned_assertion, {:settings => settings})
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert !response.is_valid?
           assert_includes response.errors, "Found an unexpected number of Signature Element. SAML Response rejected"
@@ -1614,10 +1614,10 @@ class RubySamlTest < Minitest::Test
 
       describe "check right settings" do
         it "is not possible to decrypt the assertion if no private key" do
-          response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
 
           encrypted_assertion_node = response.document.xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           response.settings.private_key = nil
@@ -1629,16 +1629,16 @@ class RubySamlTest < Minitest::Test
         end
 
         it "is possible to decrypt the assertion if private key" do
-          response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
 
           encrypted_assertion_node = response.document.xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           decrypted = response.send(:decrypt_assertion, encrypted_assertion_node)
 
           encrypted_assertion_node2 = decrypted.as(XML::Node).xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           assert_nil encrypted_assertion_node2
@@ -1648,16 +1648,16 @@ class RubySamlTest < Minitest::Test
         it "is possible to decrypt the assertion if private key provided and EncryptedKey RetrievalMethod presents in response" do
           settings.private_key = crystal_saml_key_text
           resp = read_response("response_with_retrieval_method.xml")
-          response = Saml::Response.new(resp, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(resp, {:settings => settings})
 
           encrypted_assertion_node = response.document.xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           decrypted = response.send(:decrypt_assertion, encrypted_assertion_node)
 
           encrypted_assertion_node2 = decrypted.as(XML::Node).xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
 
@@ -1667,15 +1667,15 @@ class RubySamlTest < Minitest::Test
 
         it "is possible to decrypt the assertion if private key but no saml namespace on the Assertion Element that is inside the EncryptedAssertion" do
           unsigned_message_encrypted_assertion_without_saml_namespace = read_response("unsigned_message_encrypted_assertion_without_saml_namespace.xml.base64")
-          response = Saml::Response.new(unsigned_message_encrypted_assertion_without_saml_namespace, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_encrypted_assertion_without_saml_namespace, {:settings => settings})
           encrypted_assertion_node = response.document.xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           decrypted = response.send(:decrypt_assertion, encrypted_assertion_node)
 
           encrypted_assertion_node2 = decrypted.as(XML::Node).xpath_node(
-            "(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",
+            "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
             { "p" => "urn:oasis:names:tc:SAML:2.0:protocol", "a" => "urn:oasis:names:tc:SAML:2.0:assertion" }
           )
           assert_nil encrypted_assertion_node2
@@ -1686,28 +1686,28 @@ class RubySamlTest < Minitest::Test
       describe "check different encrypt methods supported" do
         it "EncryptionMethod DES-192 && Key Encryption Algorithm RSA-1_5" do
           unsigned_message_des192_encrypted_signed_assertion = read_response("unsigned_message_des192_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_des192_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_des192_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
         it "EncryptionMethod AES-128 && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           unsigned_message_aes128_encrypted_signed_assertion = read_response("unsigned_message_aes128_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_aes128_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_aes128_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
         it "EncryptionMethod AES-192 && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           unsigned_message_aes192_encrypted_signed_assertion = read_response("unsigned_message_aes192_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_aes192_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_aes192_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
         it "EncryptionMethod AES-256 && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           unsigned_message_aes256_encrypted_signed_assertion = read_response("unsigned_message_aes256_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_aes256_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_aes256_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
@@ -1715,7 +1715,7 @@ class RubySamlTest < Minitest::Test
         it "EncryptionMethod AES-128-GCM && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           return unless OpenSSL::Cipher.new "AES-128-GCM"
           unsigned_message_aes128gcm_encrypted_signed_assertion = read_response("unsigned_message_aes128gcm_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_aes128gcm_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_aes128gcm_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
@@ -1723,7 +1723,7 @@ class RubySamlTest < Minitest::Test
         it "EncryptionMethod AES-192-GCM && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           return unless OpenSSL::Cipher.new "AES-192-GCM"
           unsigned_message_aes192gcm_encrypted_signed_assertion = read_response("unsigned_message_aes192gcm_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_aes192gcm_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_aes192gcm_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
@@ -1731,7 +1731,7 @@ class RubySamlTest < Minitest::Test
         it "EncryptionMethod AES-256-GCM && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           return unless OpenSSL::Cipher.new "AES-256-GCM"
           unsigned_message_aes256gcm_encrypted_signed_assertion = read_response("unsigned_message_aes256gcm_encrypted_signed_assertion.xml.base64")
-          response = Saml::Response.new(unsigned_message_aes256gcm_encrypted_signed_assertion, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+          response = Saml::Response.new(unsigned_message_aes256gcm_encrypted_signed_assertion, {:settings => settings})
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
@@ -1749,7 +1749,7 @@ class RubySamlTest < Minitest::Test
     end
     describe "test qualified name id in attributes" do
       it "parsed the nameid" do
-        response = Saml::Response.new(read_response("signed_nameid_in_atts.xml"), {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(read_response("signed_nameid_in_atts.xml"), {:settings => settings})
         response.settings.idp_cert_fingerprint = "c51985d947f1be57082025050846eb27f6cab783"
         assert_empty response.errors
         assert_equal "test", response.attributes[:uid]
@@ -1759,7 +1759,7 @@ class RubySamlTest < Minitest::Test
 
     describe "test unqualified name id in attributes" do
       it "parsed the nameid" do
-        response = Saml::Response.new(read_response("signed_unqual_nameid_in_atts.xml"), {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response = Saml::Response.new(read_response("signed_unqual_nameid_in_atts.xml"), {:settings => settings})
         response.settings.idp_cert_fingerprint = "c51985d947f1be57082025050846eb27f6cab783"
         assert_empty response.errors
         assert_equal "test", response.attributes[:uid]
@@ -1771,7 +1771,7 @@ class RubySamlTest < Minitest::Test
       it "should not be valid" do
         settings.private_key = crystal_saml_key_text
         signature_wrapping_attack = read_invalid_response("encrypted_new_attack.xml.base64")
-        response_wrapped = Saml::SpecialResponse3.new(signature_wrapping_attack, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response_wrapped = Saml::SpecialResponse3.new(signature_wrapping_attack, {:settings => settings})
         settings.idp_cert_fingerprint = "385b1eec71143f00db6af936e2ea12a28771d72c"
         assert !response_wrapped.is_valid?
         assert_includes response_wrapped.errors, "Found an invalid Signed Element. SAML Response rejected"
@@ -1781,7 +1781,7 @@ class RubySamlTest < Minitest::Test
     describe "signature wrapping attack - concealed SAML response body" do
       it "should not be valid" do
         signature_wrapping_attack = read_invalid_response("response_with_concealed_signed_assertion.xml")
-        response_wrapped = Saml::SpecialResponse3.new(signature_wrapping_attack, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response_wrapped = Saml::SpecialResponse3.new(signature_wrapping_attack, {:settings => settings})
         settings.idp_cert_fingerprint = "4b68c453c7d994aad9025c99d5efcf566287fe8d"
         assert !response_wrapped.is_valid?
         assert_includes response_wrapped.errors, "SAML Response must contain 1 assertion"
@@ -1791,7 +1791,7 @@ class RubySamlTest < Minitest::Test
     describe "signature wrapping attack - doubled signed assertion SAML response" do
       it "should not be valid" do
         signature_wrapping_attack = read_invalid_response("response_with_doubled_signed_assertion.xml")
-        response_wrapped = Saml::SpecialResponse3.new(signature_wrapping_attack, {:settings => settings}.as(Hash(Symbol, Response::OptionValue)))
+        response_wrapped = Saml::SpecialResponse3.new(signature_wrapping_attack, {:settings => settings})
         settings.idp_cert_fingerprint = "4b68c453c7d994aad9025c99d5efcf566287fe8d"
         assert !response_wrapped.is_valid?
         assert_includes response_wrapped.errors, "SAML Response must contain 1 assertion"

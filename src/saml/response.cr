@@ -4,7 +4,7 @@ module Saml
   # SAML2 Authentication Response. SAML Response
   #
   class Response < SamlMessage
-    alias OptionValue = String | Bool | Float32 | Int32 | Time::Span | Settings
+    alias OptionValue = String | Bool | Float32 | Float64 | Int32 | Int64 | Time::Span | Settings | Symbol
     include ErrorHandling
 
     ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion"
@@ -20,7 +20,7 @@ module Saml
     getter document : XMLSecurity::SignedDocument
     getter decrypted_document : XMLSecurity::SignedDocument? = nil
     getter :response
-    property :options
+    property options : Hash(Symbol, OptionValue)
 
     property :soft
 
@@ -64,20 +64,20 @@ module Saml
     #                          or skip the recipient validation of the subject confirmation element with :skip_recipient_check option
     #                          or skip the audience validation with :skip_audience option
     #
-    def initialize(response, @options = {} of Symbol => OptionValue)
-      raise ArgumentError.new("Response cannot be nil") if response.nil?
-
+    def initialize(response : String?, options = {} of Symbol => OptionValue)
+      @options = options.merge({} of Symbol => OptionValue)
+      @settings = @options[:settings]?.as?(Saml::Settings) || Saml::Settings.new
       @error_messages = [] of String
 
       @soft = true
-      @settings = options[:settings]?.as?(Saml::Settings) || Saml::Settings.new
       if settings = @settings
         unless settings.soft.nil?
           @soft = settings.soft
         end
       end
 
-      @response = decode_raw_saml(response, settings)
+      response = response && !response.empty? ? response : "<blank></blank>"
+      @response = decode_raw_saml(response, @settings)
       @document = XMLSecurity::SignedDocument.new(@response, @error_messages)
 
       if assertion_encrypted?
@@ -174,34 +174,38 @@ module Saml
         if stmt_elements = xpath_from_signed_assertion("/a:AttributeStatement")
           stmt_elements.each do |stmt_element|
             stmt_element.children.each do |attr_element|
+              next unless attr_element.element?
+
               if attr_element.name == "EncryptedAttribute"
                 node = decrypt_attribute(attr_element.dup)
               else
                 node = attr_element
               end
 
-              if node && (name = node["Name"])
+              if node && (name = node["Name"]?)
                 if options[:check_duplicated_attributes]? && attributes.includes?(name)
                   raise ValidationError.new("Found an Attribute element with duplicated Name")
                 end
 
-                values = node.children.map { |e|
-                  if (e.children.nil? || e.children.size == 0)
+                values = node.children.select{|e| e.element? }.map do |e|
+                  # if we don't have any child element nodes
+                  if e.xpath_nodes("./*").empty?
                     # SAMLCore requires that nil AttributeValues MUST contain xsi:nil XML attribute set to "true" or "1"
                     # otherwise the value is to be regarded as empty.
-                    ["true", "1"].includes?(e.attributes["xsi:nil"]) ? nil : Utils.element_text(e)
+                    ["true", "1"].includes?(e["xsi:nil"]?) ? nil : Utils.element_text(e)
                     # explicitly support saml2:NameID with saml2:NameQualifier if supplied in attributes
                     # this is useful for allowing eduPersonTargetedId to be passed as an opaque identifier to use to
                     # identify the subject in an SP rather than email or other less opaque attributes
                     # NameQualifier, if present is prefixed with a "/" to the value
                   else
                     e.xpath_nodes("a:NameID", { "a" => ASSERTION }).map do |n|
-                      base_path = n.attributes["NameQualifier"] ? "#{n.attributes["NameQualifier"]}/" : ""
+                      base_path = n["NameQualifier"]? ? "#{n["NameQualifier"]}/" : ""
                       "#{base_path}#{Utils.element_text(n)}"
                     end
                   end
-                }
+                end
               else
+                puts "INALID STATMENT: #{stmt_element.inspect}"
                 raise ValidationError.new("Found an Attribute element with no Name")
               end
 
@@ -250,7 +254,7 @@ module Saml
               { "p" => PROTOCOL }
             )
             statuses = nodes.map do |inner_node|
-              inner_node.attributes["Value"]
+              inner_node["Value"]
             end
 
             code = [code, statuses].flatten.join(" | ")
@@ -399,8 +403,9 @@ module Saml
 
     def assertion_id
       @assertion_id ||= begin
-        node = xpath_first_from_signed_assertion("")
-        node.nil? ? nil : node.attributes["ID"]
+        if node = xpath_first_from_signed_assertion("")
+          node["ID"]?
+        end
       end
     end
 
@@ -482,7 +487,7 @@ module Saml
     # @return [Boolean] True if the required info is found, false otherwise
     #
     private def validate_response_state
-      return append_error("Blank response") if response.nil? || response.empty?
+      return append_error("Blank response") if response.empty? || response == "<blank></blank>"
 
       return append_error("No settings on response") if settings.nil?
 
@@ -663,7 +668,7 @@ module Saml
       return true if settings.sp_entity_id.nil? || settings.sp_entity_id.not_nil!.empty?
 
       if audiences.empty?
-        return true unless settings.security[:strict_audience_validation]
+        return true unless settings.security[:strict_audience_validation]?
         return append_error("Invalid Audiences. The <AudienceRestriction> element contained only empty <Audience> elements. Expected audience #{settings.sp_entity_id}.")
       end
 
@@ -683,7 +688,7 @@ module Saml
     #
     private def validate_destination
       return true if destination.nil?
-      return true if options[:skip_destination]
+      return true if options[:skip_destination]?
 
       if destination.nil? || destination.not_nil!.empty?
         error_msg = "The response has an empty Destination value"
@@ -706,6 +711,7 @@ module Saml
     # @return [Boolean] True if there is a conditions element and is unique
     #
     private def validate_one_conditions
+      puts "OPTIOS: #{options.inspect}"
       return true if options[:skip_conditions]?
 
       conditions_nodes = xpath_from_signed_assertion("/a:Conditions") || [] of XML::NodeSet
@@ -818,7 +824,7 @@ module Saml
       if subject_confirmation_nodes = xpath_from_signed_assertion("/a:Subject/a:SubjectConfirmation")
         now = Time.utc
         subject_confirmation_nodes.each do |subject_confirmation|
-          if subject_confirmation.attributes.includes? "Method" && subject_confirmation.attributes["Method"] != "urn:oasis:names:tc:SAML:2.0:cm:bearer"
+          if subject_confirmation["Method"]? && subject_confirmation["Method"] != "urn:oasis:names:tc:SAML:2.0:cm:bearer"
             next
           end
 
@@ -829,11 +835,16 @@ module Saml
 
           next unless confirmation_data_node
 
-          attrs = confirmation_data_node.attributes
-          next if (attrs.includes? "InResponseTo" && attrs["InResponseTo"] != in_response_to) ||
-                  (attrs.includes? "NotBefore" && now < (parse_time(confirmation_data_node, "NotBefore").not_nil! - allowed_clock_drift)) ||
-                  (attrs.includes? "NotOnOrAfter" && now >= (parse_time(confirmation_data_node, "NotOnOrAfter").not_nil! + allowed_clock_drift)) ||
-                  (attrs.includes? "Recipient" && !options[:skip_recipient_check] && settings && attrs["Recipient"] != settings.assertion_consumer_service_url)
+          next if (confirmation_data_node["InResponseTo"]? && confirmation_data_node["InResponseTo"] != in_response_to) ||
+                  (confirmation_data_node["Recipient"]? && !options[:skip_recipient_check]? && settings && confirmation_data_node["Recipient"] != settings.assertion_consumer_service_url)
+
+          if not_before = parse_time(confirmation_data_node, "NotBefore")
+            next if (confirmation_data_node["NotBefore"]? && now < (not_before - allowed_clock_drift))
+          end
+
+          if not_on_or_after = parse_time(confirmation_data_node, "NotOnOrAfter")
+            next if (confirmation_data_node["NotOnOrAfter"]? && now >= (not_on_or_after + allowed_clock_drift))
+          end
 
           valid_subject_confirmation = true
           break
@@ -1043,10 +1054,10 @@ module Saml
     #
     private def decrypt_assertion_from_document(document_copy)
       if response_node = document_copy.xpath_node(
-          "/p:Response/",
+          "/p:Response",
           { "p" => PROTOCOL }
         )
-        if encrypted_assertion_node = document_copy.xpath_node("(/p:Response/EncryptedAssertion/)|(/p:Response/a:EncryptedAssertion/)",{ "p" => PROTOCOL, "a" => ASSERTION })
+        if encrypted_assertion_node = document_copy.xpath_node("(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",{ "p" => PROTOCOL, "a" => ASSERTION })
           if decrypted = decrypt_assertion(encrypted_assertion_node)
             response_node << decrypted
           else
@@ -1092,7 +1103,7 @@ module Saml
     # @return [XML::Node] The decrypted element
     #
     private def decrypt_element(encrypt_node : XML::Node, rgrex)
-      if !settings.try(&.get_sp_key)
+      if !settings.get_sp_key
         raise ValidationError.new("An " + (encrypt_node.try(&.name) || "unknown node name") + " found and no SP private key found on the settings to decrypt it")
       end
 
@@ -1102,15 +1113,17 @@ module Saml
         node_header = "<node xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\">"
       end
 
-      if elem_plaintext = Saml::Utils.decrypt_data(encrypt_node, self.settings!.get_sp_key)
-        # If we get some problematic noise in the plaintext after decrypting.
-        # This quick regexp parse will grab only the Element and discard the noise.
-        if match = elem_plaintext.match(rgrex)
-          elem_plaintext = match[0]
-        end
-      end
+      elem_plaintext = Saml::Utils.decrypt_data(encrypt_node, self.settings.get_sp_key_text)
 
-      if elem_plaintext
+      if elem_plaintext = elem_plaintext.to_s
+        begin
+          if match = elem_plaintext.to_s.match(rgrex)
+            elem_plaintext = match[0]
+          end
+        rescue
+          return nil
+        end
+
         # To avoid namespace errors if saml namespace is not defined
         # create a parent node first with the namespace defined
         elem_plaintext = node_header + elem_plaintext + "</node>"
