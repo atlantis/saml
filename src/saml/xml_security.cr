@@ -417,10 +417,10 @@ module XMLSecurity
           return append_error("Couldn't load X509 certificate", soft)
         end
 
-        puts "validating signature: #{Base64.encode(signature)}\n\n"
-        puts "with cannon string\n#{canon_string}\n\n"
-        puts "from original chunk\n#{noko_sig_element.not_nil!.to_xml(options: XML::SaveOptions::AS_XML)}\n\n"
-        puts "and certificate\n#{cert.public_key.to_pem}\n\n"
+        # puts "validating signature: #{Base64.encode(signature)}\n\n"
+        # puts "with cannon string\n#{canon_string}\n\n"
+        # puts "from original chunk\n#{noko_sig_element.not_nil!.to_xml(options: XML::SaveOptions::AS_XML)}\n\n"
+        # puts "and certificate\n#{cert.public_key.to_pem}\n\n"
 
         # verify signature
         unless cert.public_key.verify(digest: signature_algorithm, signature: signature, data: canon_string)

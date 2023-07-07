@@ -219,8 +219,9 @@ module Saml
     #
     def session_expires_at
       @expires_at ||= begin
-        node = xpath_first_from_signed_assertion("/a:AuthnStatement")
-        node.nil? ? nil : parse_time(node, "SessionNotOnOrAfter")
+        if node = xpath_first_from_signed_assertion("/a:AuthnStatement")
+          parse_time(node, "SessionNotOnOrAfter")
+        end
       end
     end
 
@@ -378,7 +379,7 @@ module Saml
       if drift = options[:allowed_clock_drift]?.as?(Int32 | Float32)
         Time::Span.new(nanoseconds: ((drift.to_f.abs + Float32::EPSILON) * 1000000000).round.to_i)
       else
-        Time::Span.new(seconds: 0)
+        Time::Span.new(seconds: 1)
       end
     end
 
@@ -438,9 +439,7 @@ module Saml
         @error_messages.empty?
       else
         validations.each do |validation|
-          unless validation.call
-            return false
-          end
+          return false unless validation.call == true
         end
 
         true
@@ -744,15 +743,18 @@ module Saml
       return true if options[:skip_conditions]?
 
       now = Time.utc
-
-      if (cutoff = not_before) && now < (cutoff - allowed_clock_drift)
-        error_msg = "Current time is earlier than NotBefore condition (#{now} < #{cutoff}#{" - #{allowed_clock_drift.seconds}s"})"
-        return append_error(error_msg)
+      if cutoff = not_before
+        if now < (cutoff - allowed_clock_drift)
+          error_msg = "Current time is earlier than NotBefore condition (#{now} < #{cutoff}#{" - #{allowed_clock_drift.seconds}s"})"
+          return append_error(error_msg)
+        end
       end
 
-      if (cutoff = not_on_or_after) && now >= (cutoff + allowed_clock_drift)
-        error_msg = "Current time is on or after NotOnOrAfter condition (#{now} >= #{cutoff}#{" + #{allowed_clock_drift.seconds}s"})"
-        return append_error(error_msg)
+      if cutoff = not_on_or_after
+        if now >= (cutoff + allowed_clock_drift)
+          error_msg = "Current time is on or after NotOnOrAfter condition (#{now} >= #{cutoff}#{" + #{allowed_clock_drift.seconds}s"})"
+          return append_error(error_msg)
+        end
       end
 
       true
@@ -790,12 +792,12 @@ module Saml
     # @raise [ValidationError] if soft == false and validation fails
     #
     private def validate_session_expiration
-      return true if session_expires_at.nil?
-
-      now = Time.utc
-      unless now < (session_expires_at.not_nil! + allowed_clock_drift)
-        error_msg = "The attributes have expired, based on the SessionNotOnOrAfter of the AuthnStatement of this Response"
-        return append_error(error_msg)
+      if expires_at = session_expires_at
+        now = Time.utc
+        unless now < (expires_at.not_nil! + allowed_clock_drift)
+          error_msg = "The attributes have expired, based on the SessionNotOnOrAfter of the AuthnStatement of this Response"
+          return append_error(error_msg)
+        end
       end
 
       true
@@ -1129,7 +1131,7 @@ module Saml
     #
     private def parse_time(node, attribute)
       if (n = node) && (rawtime = node[attribute]?)
-        Time::Format::ISO_8601_DATE_TIME.parse(rawtime)
+        Time::Format::RFC_3339.parse(rawtime)
       end
     end
 

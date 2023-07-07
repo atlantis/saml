@@ -305,14 +305,19 @@ describe "XmlSecurity::SignedDocument" do
 
     it "be able to validate a good response" do
       Timecop.travel( Time.parse_rfc3339("2012-11-28 17:55:00Z") ) do
-        response = Saml::Response.new(fixture(:starfield_response), options: {:skip_subject_confirmation => true.as(Saml::Response::OptionValue)})
-        assert response.is_valid?
+        r = Saml::Response.new(
+          fixture(:starfield_response),
+          {:skip_subject_confirmation => true.as(Saml::Response::OptionValue)}
+        )
+        r.settings = Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"})
+        assert r.is_valid?
       end
     end
 
     it "fail before response is valid" do
       Timecop.travel( Time.parse_rfc3339("2012-11-20 17:55:00Z") ) do
-        assert !response.is_valid?
+        r = response
+        assert !r.is_valid?
 
         time_1 = "2012-11-20 17:55:00 UTC < 2012-11-28 17:53:45 UTC"
         time_2 = "Tue Nov 20 17:55:00 UTC 2012 < Wed Nov 28 17:53:45 UTC 2012"
@@ -321,16 +326,17 @@ describe "XmlSecurity::SignedDocument" do
           "Current time is earlier than NotBefore condition (#{time} - 1s)"
         end
 
-        assert((response.errors & errors).any?)
+        assert((r.errors & errors).any?)
       end
     end
 
     it "fail after response expires" do
       Timecop.travel( Time.parse_rfc3339("2012-11-30 17:55:00Z") ) do
-        assert !response.is_valid?
-
-        contains_expected_error = response.errors.includes?("Current time is on or after NotOnOrAfter condition (2012-11-30 17:55:00 UTC >= 2012-11-28 18:33:45 UTC + 1s)")
-        contains_expected_error ||= response.errors.includes?("Current time is on or after NotOnOrAfter condition (Fri Nov 30 17:55:00 UTC 2012 >= Wed Nov 28 18:33:45 UTC 2012 + 1s)")
+        r = response
+        assert !r.is_valid?
+puts r.errors.inspect
+        contains_expected_error = r.errors.includes?("Current time is on or after NotOnOrAfter condition (2012-11-30 17:55:00 UTC >= 2012-11-28 18:33:45 UTC + 1s)")
+        contains_expected_error ||= r.errors.includes?("Current time is on or after NotOnOrAfter condition (Fri Nov 30 17:55:00 UTC 2012 >= Wed Nov 28 18:33:45 UTC 2012 + 1s)")
         assert contains_expected_error
       end
     end
