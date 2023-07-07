@@ -145,7 +145,7 @@ module Saml
       if settings.idp_slo_service_binding == Utils::BINDINGS[:post] && settings.private_key && settings.certificate
         if private_key = settings.get_sp_key
           if cert = settings.get_sp_cert
-            document.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+            document.sign_document(private_key, cert, settings.security[:signature_method].as?(String), settings.security[:digest_method])
           else
             raise "No cert"
           end

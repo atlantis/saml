@@ -217,6 +217,13 @@ module XMLSecurity
     def format_certificate(cert_text : String?) : String?
       return nil unless cert_text
 
+      begin
+        if (decoded = Base64.decode_string(cert_text)) && decoded.starts_with?("-----BEGIN CERTIFICATE-----")
+          cert_text = decoded
+        end
+      rescue
+      end
+
       # memory error possible unless base64 newlines are respected!
       if cert_text.starts_with?("-----BEGIN CERTIFICATE-----")
         cert_text = cert_text.gsub("-----BEGIN CERTIFICATE-----", "").gsub("-----END CERTIFICATE-----", "").gsub(/\s/m, "")
@@ -334,7 +341,7 @@ module XMLSecurity
         # get signature
         signature = if base64_signature = sig_element.try(&.xpath_node("./ds:SignatureValue",{ "ds" => DSIG }))
           if scrubbed_text = Saml::Utils.element_text(base64_signature)
-            Base64.decode(scrubbed_text)
+            Base64.decode_string(scrubbed_text)
           end
         end
 
@@ -345,9 +352,13 @@ module XMLSecurity
         ))
 
         if noko_sig_element = document.xpath_node("//ds:Signature", { "ds" => DSIG })
-          if noko_signed_info_element = noko_sig_element.xpath_node("./ds:SignedInfo", { "ds" => DSIG })
-            if dirty_hack = noko_sig_element.canonicalize(mode: canon_algorithm).to_s.match(/<ds:SignedInfo.*<\/ds:SignedInfo>/m)
-              canon_string = dirty_hack[0]
+          if noko_signed_info_element = noko_sig_element.xpath_node("./ds:SignedInfo | ./SignedInfo", { "ds" => DSIG })
+            if dirty_hack = XML.parse("<root>#{noko_signed_info_element.to_xml(options: XML::SaveOptions::AS_XML)}</root>")
+              if hack_content = dirty_hack.children[0].canonicalize(mode: canon_algorithm).try &.to_s
+                canon_string = hack_content.gsub("<ds:SignedInfo>", "<ds:SignedInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\">")
+              else
+                return append_error("Couldn't hackily cannonicalize SignedInfo element", soft)
+              end
             else
               return append_error("Couldn't cannonicalize SignedInfo element", soft)
             end
@@ -412,7 +423,6 @@ module XMLSecurity
         unless cert = load_cert(base64_cert)
           return append_error("Couldn't load X509 certificate", soft)
         end
-
         # verify signature
         unless cert.public_key.verify(digest: signature_algorithm, signature: signature, data: canon_string)
           return append_error("Key validation error", soft)
