@@ -413,31 +413,37 @@ module Saml
       return false unless validate_response_state
 
       validations = [
-        validate_version,
-        validate_id,
-        validate_success_status,
-        validate_num_assertion,
-        validate_no_duplicated_attributes,
-        validate_signed_elements,
-        validate_structure,
-        validate_in_response_to,
-        validate_one_conditions,
-        validate_conditions,
-        validate_one_authnstatement,
-        validate_audience,
-        validate_destination,
-        validate_issuer,
-        validate_session_expiration,
-        validate_subject_confirmation,
-        validate_name_id,
-        validate_signature,
+        ->{ self.validate_version },
+        ->{ self.validate_id },
+        ->{ self.validate_success_status },
+        ->{ self.validate_num_assertion },
+        ->{ self.validate_no_duplicated_attributes },
+        ->{ self.validate_signed_elements },
+        ->{ self.validate_structure },
+        ->{ self.validate_in_response_to },
+        ->{ self.validate_one_conditions },
+        ->{ self.validate_conditions },
+        ->{ self.validate_one_authnstatement },
+        ->{ self.validate_audience },
+        ->{ self.validate_destination },
+        ->{ self.validate_issuer },
+        ->{ self.validate_session_expiration },
+        ->{ self.validate_subject_confirmation },
+        -> { self.validate_name_id },
+        ->{ self.validate_signature },
       ]
 
       if collect_errors
-        validations.each { |validation| validation.call if validation.responds_to?(:call) }
+        validations.each { |validation| validation.call }
         @error_messages.empty?
       else
-        validations.all? { |validation| validation.call if validation.responds_to?(:call) }
+        validations.each do |validation|
+          unless validation.call
+            return false
+          end
+        end
+
+        true
       end
     end
 
@@ -796,7 +802,7 @@ module Saml
     end
 
     # Validates if exists valid SubjectConfirmation (If the response was initialized with the :allowed_clock_drift option,
-    # timimg validation are relaxed by the allowed_clock_drift value. If the response was initialized with the
+    # timing validation are relaxed by the allowed_clock_drift value. If the response was initialized with the
     # :skip_subject_confirmation option, this validation is skipped)
     # There is also an optional Recipient check
     # If fails, the error is added to the errors array
@@ -910,7 +916,7 @@ module Saml
           end
 
           if fingerprint && doc.validate_document(fingerprint, @soft, opts)
-            if settings.security[:check_idp_cert_expiration]
+            if settings.security[:check_idp_cert_expiration]?
               if Saml::Utils.is_cert_expired(idp_cert)
                 error_msg = "IdP x509 certificate expired"
                 return append_error(error_msg)
@@ -925,7 +931,7 @@ module Saml
           idp_certs[:signing].each do |idp_cert|
             valid = doc.validate_document_with_cert(idp_cert, true)
             if valid
-              if settings.security[:check_idp_cert_expiration]
+              if settings.security[:check_idp_cert_expiration]?
                 if Saml::Utils.is_cert_expired(idp_cert)
                   expired = true
                 end

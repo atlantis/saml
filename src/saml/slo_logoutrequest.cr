@@ -274,7 +274,7 @@ module Saml
           signature: options[:get_params]["Signature"],
           query_string: query_string,
         )
-        if valid && settings.security[:check_idp_cert_expiration]
+        if valid && settings.security[:check_idp_cert_expiration]?
           if Saml::Utils.is_cert_expired(idp_cert)
             expired = true
           end
@@ -289,7 +289,7 @@ module Saml
             query_string: query_string,
           )
           if valid
-            if settings.security[:check_idp_cert_expiration]
+            if settings.security[:check_idp_cert_expiration]?
               if Saml::Utils.is_cert_expired(signing_idp_cert)
                 expired = true
               end

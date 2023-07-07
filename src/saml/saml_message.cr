@@ -85,10 +85,11 @@ module Saml
       end
 
       decoded = decode(saml)
+
       begin
         inflate(decoded).to_s
       rescue ex
-        puts "Error while inflate: #{ex.inspect_with_backtrace}"
+        #puts "Error while inflate: #{ex.inspect_with_backtrace}"
         decoded.to_s
       end
     end
@@ -109,7 +110,7 @@ module Saml
     # @return [Bytes] The decoded string
     #
     private def decode(string)
-      Base64.decode(string)
+      Base64.decode_string(string)
     end
 
     # Base 64 encode method

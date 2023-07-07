@@ -287,10 +287,7 @@ module XMLSecurity
 
     def validate_document_with_cert(idp_cert, soft = true)
       # get cert from response
-      cert_element = self.xpath_node(
-        "//ds:X509Certificate",
-        { "ds" => DSIG }
-      )
+      cert_element = self.xpath_node("//*[local-name()='X509Certificate']")
 
       if cert_element
         if cert_text = Saml::Utils.element_text(cert_element)
@@ -352,19 +349,15 @@ module XMLSecurity
         ))
 
         if noko_sig_element = document.xpath_node("//ds:Signature", { "ds" => DSIG })
-          if noko_signed_info_element = noko_sig_element.xpath_node("./ds:SignedInfo | ./SignedInfo", { "ds" => DSIG })
-            if dirty_hack = XML.parse("<root>#{noko_signed_info_element.to_xml(options: XML::SaveOptions::AS_XML)}</root>")
-              if hack_content = dirty_hack.children[0].canonicalize(mode: canon_algorithm).try &.to_s
-                canon_string = hack_content.gsub("<ds:SignedInfo>", "<ds:SignedInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\">")
-              else
-                return append_error("Couldn't hackily cannonicalize SignedInfo element", soft)
-              end
-            else
-              return append_error("Couldn't cannonicalize SignedInfo element", soft)
-            end
-          else
-            return append_error("Couldn't find SignedInfo element", soft)
+          unless dirty_hack_copy = XML.parse( noko_sig_element.canonicalize(mode: canon_algorithm), XML_PARSER_OPTIONS )
+            return append_error("Couldn't hackily cannonicalize SignedInfo element", soft)
           end
+
+          unless dirty_hack_node = dirty_hack_copy.xpath_node("//*[local-name()='SignedInfo']")
+            return append_error("Couldn't hackily harvest SignedInfo element", soft)
+          end
+
+          canon_string = dirty_hack_node.to_xml(options: XML::SaveOptions::NO_EMPTY)
         else
           return append_error("Couldn't find Signature node", soft)
         end
@@ -423,6 +416,12 @@ module XMLSecurity
         unless cert = load_cert(base64_cert)
           return append_error("Couldn't load X509 certificate", soft)
         end
+
+        puts "validating signature: #{Base64.encode(signature)}\n\n"
+        puts "with cannon string\n#{canon_string}\n\n"
+        puts "from original chunk\n#{noko_sig_element.not_nil!.to_xml(options: XML::SaveOptions::AS_XML)}\n\n"
+        puts "and certificate\n#{cert.public_key.to_pem}\n\n"
+
         # verify signature
         unless cert.public_key.verify(digest: signature_algorithm, signature: signature, data: canon_string)
           return append_error("Key validation error", soft)
