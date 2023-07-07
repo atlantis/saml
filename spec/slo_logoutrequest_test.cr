@@ -111,7 +111,7 @@ class RubySamlTest < Minitest::Test
         time_value = "2014-07-17T01:01:48Z"
         assert_nil logout_request.not_on_or_after
         logout_request.document.root.attributes["NotOnOrAfter"] = time_value
-        assert_equal Time.parse(time_value), logout_request.not_on_or_after
+        assert_equal Time.parse_rfc3339(time_value), logout_request.not_on_or_after
       end
     end
 
@@ -156,7 +156,7 @@ class RubySamlTest < Minitest::Test
         assert logout_request.send(:validate_not_on_or_after)
         assert_empty logout_request.errors
 
-        Timecop Time.parse("2014-07-17T01:01:47Z") do
+        Timecop.travel Time.parse_rfc3339("2014-07-17T01:01:47Z") do
           logout_request.document.root.attributes["NotOnOrAfter"] = "2014-07-17T01:01:48Z"
           assert logout_request.send(:validate_not_on_or_after)
           assert_empty logout_request.errors
@@ -164,7 +164,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "return false when the logout request has an invalid NotOnOrAfter" do
-        Timecop Time.parse("2014-07-17T01:01:49Z") do
+        Timecop.travel Time.parse_rfc3339("2014-07-17T01:01:49Z") do
           logout_request.document.root.attributes["NotOnOrAfter"] = "2014-07-17T01:01:48Z"
           assert !logout_request.send(:validate_not_on_or_after)
           assert_match(/Current time is on or after NotOnOrAfter/, logout_request.errors[0])
@@ -172,7 +172,7 @@ class RubySamlTest < Minitest::Test
       end
 
       it "raise when the logout request has an invalid NotOnOrAfter" do
-        Timecop Time.parse("2014-07-17T01:01:49Z") do
+        Timecop.travel Time.parse_rfc3339("2014-07-17T01:01:49Z") do
           logout_request.document.root.attributes["NotOnOrAfter"] = "2014-07-17T01:01:48Z"
           logout_request.soft = false
           assert_raises(Saml::ValidationError, "Current time is on or after NotOnOrAfter") do
@@ -189,7 +189,7 @@ class RubySamlTest < Minitest::Test
         logout_request.document.root.attributes["NotOnOrAfter"] = "2011-06-14T18:31:01.516Z"
 
         # The NotBefore condition in the document is 2011-06-1418:31:01.516Z
-        Timecop(Time.parse("2011-06-14T18:31:02Z")) do
+        Timecop.travel(Time.parse_rfc3339("2011-06-14T18:31:02Z")) do
           logout_request.options[:allowed_clock_drift] = 0.483
           assert !logout_request.send(:validate_not_on_or_after)
 

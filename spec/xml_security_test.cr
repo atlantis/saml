@@ -334,7 +334,7 @@ describe "XmlSecurity::SignedDocument" do
       Timecop.travel( Time.parse_rfc3339("2012-11-30 17:55:00Z") ) do
         r = response
         assert !r.is_valid?
-puts r.errors.inspect
+
         contains_expected_error = r.errors.includes?("Current time is on or after NotOnOrAfter condition (2012-11-30 17:55:00 UTC >= 2012-11-28 18:33:45 UTC + 1s)")
         contains_expected_error ||= r.errors.includes?("Current time is on or after NotOnOrAfter condition (Fri Nov 30 17:55:00 UTC 2012 >= Wed Nov 28 18:33:45 UTC 2012 + 1s)")
         assert contains_expected_error

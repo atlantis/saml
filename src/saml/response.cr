@@ -20,7 +20,7 @@ module Saml
     getter document : XMLSecurity::SignedDocument
     getter decrypted_document : XMLSecurity::SignedDocument? = nil
     getter :response
-    getter :options
+    property :options
 
     property :soft
 
@@ -112,8 +112,8 @@ module Saml
     #
     def name_id_format
       @name_id_format ||=
-        if name_id_node && name_id_node.attribute("Format")
-          name_id_node.attribute("Format").value
+        if node = name_id_node
+          node["Format"]
         end
     end
 
@@ -134,8 +134,8 @@ module Saml
     #
     def name_id_namequalifier
       @name_id_namequalifier ||=
-        if name_id_node && name_id_node.attribute("NameQualifier")
-          name_id_node.attribute("NameQualifier").value
+        if node = name_id_node
+          node["NameQualifier"]
         end
     end
 

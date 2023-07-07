@@ -8,6 +8,9 @@ class Minitest::Test
   @response_document_without_recipient : String?
   @response_document_valid_signed_without_x509certificate : String?
   @crystal_saml_cert_fingerprint : String?
+  @response_document_with_signed_assertion : String?
+  @response_document_valid_signed : String?
+  @response_document_unsigned : String?
 
   def fixture(document, base64 = true)
     response = Dir.glob(File.join(File.dirname(__FILE__), "responses", "#{document}*")).first
