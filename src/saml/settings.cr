@@ -104,7 +104,7 @@ module Saml
         when :single_logout_service_binding
           self.single_logout_service_binding = v.as?(String)
         when :idp_cert_fingerprint
-          self.idp_cert_fingerprint_algorithm = v.as?(String)
+          self.idp_cert_fingerprint = v.as?(String)
         when :idp_cert_fingerprint_algorithm
           self.idp_cert_fingerprint_algorithm = v.as?(String)
         when :compress_request

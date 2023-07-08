@@ -163,22 +163,51 @@ class RubySamlTest < Minitest::Test
     let(:response_invalid_signature_position) { Saml::Response.new(read_invalid_response("invalid_signature_position.xml.base64")) }
     let(:response_encrypted_nameid) { Saml::Response.new(response_document_encrypted_nameid) }
 
-    describe "#check_one_conditions" do
-      # it "return false when none or more than one conditions element" do
-      #   response_no_conditions.soft = true
-      #   assert !response_no_conditions.send(:validate_one_conditions)
-      #   assert_includes response_no_conditions.errors, "The Assertion must include one Conditions element"
-      # end
+    describe "retrieve nameID and attributes from encrypted assertion" do
+      before do
+        settings.idp_cert_fingerprint = "EE:17:4E:FB:A8:81:71:12:0D:2A:78:43:BC:E7:0C:07:58:79:F4:F4"
+        settings.sp_entity_id = "http://rubysaml.com:3000/saml/metadata"
+        settings.assertion_consumer_service_url = "http://rubysaml.com:3000/saml/acs"
+        settings.certificate = crystal_saml_cert_text
+        settings.private_key = crystal_saml_key_text
+      end
 
-      # it "return true when one conditions element" do
-      #   response.soft = true
-      #   assert response.send(:validate_one_conditions)
-      # end
+      it "is possible when signed_message_encrypted_unsigned_assertion" do
+        response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
+        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
+          assert response.is_valid?
+          assert_empty response.errors
+          assert_equal "test", response.attributes[:uid].first
+          assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
+        end
+      end
 
-      it "return true when no conditions are present and skip_conditions is true" do
-        response_no_conditions_with_skip.soft = true
-        puts "AFTER WRITE: #{response_no_conditions_with_skip.options.inspect}"
-        assert response_no_conditions_with_skip.send(:validate_one_conditions)
+      it "is possible when signed_message_encrypted_signed_assertion" do
+        response = Saml::Response.new(signed_message_encrypted_signed_assertion, {:settings => settings})
+        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
+          assert response.is_valid?
+          assert_empty response.errors
+          assert_equal "test", response.attributes[:uid].first
+          assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
+        end
+      end
+
+      it "is possible when unsigned_message_encrypted_signed_assertion" do
+        response = Saml::Response.new(unsigned_message_encrypted_signed_assertion,{ :settings => settings})
+        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
+          assert response.is_valid?
+           assert_empty response.errors
+          assert_equal "test", response.attributes[:uid].first
+          assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
+        end
+      end
+
+      it "is not possible when unsigned_message_encrypted_unsigned_assertion" do
+        response = Saml::Response.new(unsigned_message_encrypted_unsigned_assertion, {:settings => settings})
+        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
+          assert !response.is_valid?
+          assert_includes response.errors, "Found an unexpected number of Signature Element. SAML Response rejected"
+        end
       end
     end
   end

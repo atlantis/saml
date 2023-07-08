@@ -307,9 +307,12 @@ describe "XmlSecurity::SignedDocument" do
       Timecop.travel( Time.parse_rfc3339("2012-11-28 17:55:00Z") ) do
         r = Saml::Response.new(
           fixture(:starfield_response),
-          {:skip_subject_confirmation => true.as(Saml::Response::OptionValue)}
+          {
+            :skip_subject_confirmation => true.as(Saml::Response::OptionValue),
+            :settings => Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"})
+          }
         )
-        r.settings = Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"})
+        r.is_valid?
         assert r.is_valid?
       end
     end

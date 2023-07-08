@@ -67,6 +67,8 @@ module Saml
     def initialize(response : String?, options = {} of Symbol => OptionValue)
       @options = options.merge({} of Symbol => OptionValue)
       @settings = @options[:settings]?.as?(Saml::Settings) || Saml::Settings.new
+      @options.delete(:settings)
+
       @error_messages = [] of String
 
       @soft = true
@@ -192,7 +194,7 @@ module Saml
                   if e.xpath_nodes("./*").empty?
                     # SAMLCore requires that nil AttributeValues MUST contain xsi:nil XML attribute set to "true" or "1"
                     # otherwise the value is to be regarded as empty.
-                    ["true", "1"].includes?(e["xsi:nil"]?) ? nil : Utils.element_text(e)
+                    ["true", "1"].includes?(e["xsi:nil"]? || e["nil"]?) ? nil : Utils.element_text(e)
                     # explicitly support saml2:NameID with saml2:NameQualifier if supplied in attributes
                     # this is useful for allowing eduPersonTargetedId to be passed as an opaque identifier to use to
                     # identify the subject in an SP rather than email or other less opaque attributes
@@ -205,7 +207,6 @@ module Saml
                   end
                 end
               else
-                puts "INALID STATMENT: #{stmt_element.inspect}"
                 raise ValidationError.new("Found an Attribute element with no Name")
               end
 
@@ -711,7 +712,6 @@ module Saml
     # @return [Boolean] True if there is a conditions element and is unique
     #
     private def validate_one_conditions
-      puts "OPTIOS: #{options.inspect}"
       return true if options[:skip_conditions]?
 
       conditions_nodes = xpath_from_signed_assertion("/a:Conditions") || [] of XML::NodeSet
@@ -1064,7 +1064,7 @@ module Saml
             raise "Could not decrypt the EncryptedAssertion element"
           end
           encrypted_assertion_node.unlink
-          XMLSecurity::SignedDocument.new(response_node.to_s)
+          XMLSecurity::SignedDocument.new(response_node.to_xml(options: XML::SaveOptions::NO_EMPTY))
         else
           raise "Could not find an EncryptedAssertion element in the response"
         end

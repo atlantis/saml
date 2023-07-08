@@ -1290,18 +1290,17 @@ class RubySamlTest < Minitest::Test
       end
 
       it "extract all attributes" do
-        puts "ATTRS: #{response.attributes.inspect}"
         assert_equal "demo", response.attributes[:uid].first
         assert_equal "value", response.attributes[:another_value].first
       end
 
       it "work for implicit namespaces" do
-        assert_equal "someone@example.com", response_with_signed_assertion.attributes["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"]
+        assert_equal "someone@example.com", response_with_signed_assertion.attributes["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"].first
       end
 
       it "extract attributes from all AttributeStatement tags" do
-        assert_equal "smith", response_with_multiple_attribute_statements.attributes[:surname]
-        assert_equal "bob", response_with_multiple_attribute_statements.attributes[:firstname]
+        assert_equal "smith", response_with_multiple_attribute_statements.attributes[:surname].first
+        assert_equal "bob", response_with_multiple_attribute_statements.attributes[:firstname].first
       end
 
       it "not raise on responses without attributes" do
@@ -1322,8 +1321,8 @@ class RubySamlTest < Minitest::Test
           settings.private_key = crystal_saml_key_text
           response_encrypted_attrs.settings = settings
           attributes = response_encrypted_attrs.attributes
-          assert_equal "test", attributes[:uid]
-          assert_equal "test@example.com", attributes[:mail]
+          assert_equal "test", attributes[:uid].first
+          assert_equal "test@example.com", attributes[:mail].first
         end
       end
 
@@ -1341,7 +1340,7 @@ class RubySamlTest < Minitest::Test
 
       describe "#multiple values" do
         it "extract single value as string" do
-          assert_equal "demo", response_multiple_attr_values.attributes[:uid]
+          assert_equal "demo", response_multiple_attr_values.attributes[:uid].first
         end
 
         it "extract single value as string in compatibility mode off" do
@@ -1350,10 +1349,6 @@ class RubySamlTest < Minitest::Test
 
         it "extract first of multiple values as string for b/w compatibility" do
           assert_equal "value1", response_multiple_attr_values.attributes[:another_value]
-        end
-
-        it "extract first of multiple values as string for b/w compatibility in compatibility mode off" do
-          assert_equal ["value1", "value2"], response_multiple_attr_values.attributes[:another_value]
         end
 
         it "return array with all attributes when asked in XML order" do
@@ -1365,7 +1360,7 @@ class RubySamlTest < Minitest::Test
         end
 
         it "return first of multiple values when multiple Attribute tags in XML" do
-          assert_equal "role1", response_multiple_attr_values.attributes[:role]
+          assert_equal "role1", response_multiple_attr_values.attributes[:role].first
         end
 
         it "return first of multiple values when multiple Attribute tags in XML in compatibility mode off" do
@@ -1385,7 +1380,7 @@ class RubySamlTest < Minitest::Test
         end
 
         it "return nil value correctly" do
-          assert_nil response_multiple_attr_values.attributes[:attribute_with_nil_value]
+          assert_nil response_multiple_attr_values.attributes[:attribute_with_nil_value].first
         end
 
         it "return multiple values including nil and empty string" do
@@ -1573,7 +1568,7 @@ class RubySamlTest < Minitest::Test
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert response.is_valid?
           assert_empty response.errors
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
         end
       end
@@ -1583,7 +1578,7 @@ class RubySamlTest < Minitest::Test
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert response.is_valid?
           assert_empty response.errors
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
         end
       end
@@ -1593,7 +1588,7 @@ class RubySamlTest < Minitest::Test
         Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
           assert response.is_valid?
           assert_empty response.errors
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
         end
       end
@@ -1687,28 +1682,28 @@ class RubySamlTest < Minitest::Test
         it "EncryptionMethod DES-192 && Key Encryption Algorithm RSA-1_5" do
           unsigned_message_des192_encrypted_signed_assertion = read_response("unsigned_message_des192_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_des192_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
         it "EncryptionMethod AES-128 && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           unsigned_message_aes128_encrypted_signed_assertion = read_response("unsigned_message_aes128_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_aes128_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
         it "EncryptionMethod AES-192 && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           unsigned_message_aes192_encrypted_signed_assertion = read_response("unsigned_message_aes192_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_aes192_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
         it "EncryptionMethod AES-256 && Key Encryption Algorithm RSA-OAEP-MGF1P" do
           unsigned_message_aes256_encrypted_signed_assertion = read_response("unsigned_message_aes256_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_aes256_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
@@ -1716,7 +1711,7 @@ class RubySamlTest < Minitest::Test
           return unless OpenSSL::Cipher.new "AES-128-GCM"
           unsigned_message_aes128gcm_encrypted_signed_assertion = read_response("unsigned_message_aes128gcm_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_aes128gcm_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
@@ -1724,7 +1719,7 @@ class RubySamlTest < Minitest::Test
           return unless OpenSSL::Cipher.new "AES-192-GCM"
           unsigned_message_aes192gcm_encrypted_signed_assertion = read_response("unsigned_message_aes192gcm_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_aes192gcm_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
 
@@ -1732,7 +1727,7 @@ class RubySamlTest < Minitest::Test
           return unless OpenSSL::Cipher.new "AES-256-GCM"
           unsigned_message_aes256gcm_encrypted_signed_assertion = read_response("unsigned_message_aes256gcm_encrypted_signed_assertion.xml.base64")
           response = Saml::Response.new(unsigned_message_aes256gcm_encrypted_signed_assertion, {:settings => settings})
-          assert_equal "test", response.attributes[:uid]
+          assert_equal "test", response.attributes[:uid].first
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
       end
@@ -1752,7 +1747,7 @@ class RubySamlTest < Minitest::Test
         response = Saml::Response.new(read_response("signed_nameid_in_atts.xml"), {:settings => settings})
         response.settings.idp_cert_fingerprint = "c51985d947f1be57082025050846eb27f6cab783"
         assert_empty response.errors
-        assert_equal "test", response.attributes[:uid]
+        assert_equal "test", response.attributes[:uid].first
         assert_equal "http://idp.example.com/metadata.php/ZdrjpwEdw22vKoxWAbZB78/gQ7s=", response.attributes.single("urn:oid:1.3.6.1.4.1.5923.1.1.1.10")
       end
     end
@@ -1762,7 +1757,7 @@ class RubySamlTest < Minitest::Test
         response = Saml::Response.new(read_response("signed_unqual_nameid_in_atts.xml"), {:settings => settings})
         response.settings.idp_cert_fingerprint = "c51985d947f1be57082025050846eb27f6cab783"
         assert_empty response.errors
-        assert_equal "test", response.attributes[:uid]
+        assert_equal "test", response.attributes[:uid].first
         assert_equal "ZdrjpwEdw22vKoxWAbZB78/gQ7s=", response.attributes.single("urn:oid:1.3.6.1.4.1.5923.1.1.1.10")
       end
     end

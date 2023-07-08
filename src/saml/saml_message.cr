@@ -43,7 +43,7 @@ module Saml
             "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
             { "p" => PROTOCOL }
           )
-          node["ID"]
+          node["ID"]?
         end
       end
     end
