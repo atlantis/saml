@@ -14,7 +14,7 @@ description: |
 dependencies:
   openssl_ext:
     github: spider-gazelle/openssl_ext
-    commit: 97b818d
+    version: 2.3.0
 
 development_dependencies:
   timecop:
