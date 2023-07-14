@@ -308,7 +308,7 @@ class RubySamlTest < Minitest::Test
           original_query = query.dup
           query.gsub!("example", "ex%61mple")
           refute_equal(query, original_query)
-          assert_equal(URL.decode(query), URL.decode(original_query))
+          assert_equal(URI.decode(query), URI.decode(original_query))
           # Make normalised signature based on our modified params.
           sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
           signature = settings.get_sp_key.sign(sign_algorithm, query)
@@ -344,7 +344,7 @@ class RubySamlTest < Minitest::Test
           original_query = query.dup
           query.gsub!("example", "ex%61mple")
           refute_equal(query, original_query)
-          assert_equal(URL.decode(query), URL.decode(original_query))
+          assert_equal(URI.decode(query), URI.decode(original_query))
           # Make normalised signature based on our modified params.
           sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
           signature = settings.get_sp_key.sign(sign_algorithm, query)

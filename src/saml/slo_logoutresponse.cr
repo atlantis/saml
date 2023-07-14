@@ -33,8 +33,8 @@ module Saml
       url = settings.idp_slo_response_service_url || settings.idp_slo_service_url
       saml_response = Saml::Utils.url_encode(params.delete("SAMLResponse"))
       response_params = "#{params_prefix}SAMLResponse=#{saml_response}"
-      params.each_pair do |key, value|
-        response_params << "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
+      params.each do |key, value|
+        response_params += "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
       end
 
       raise SettingError.new "Invalid settings, idp_slo_service_url is not set!" if url.nil? || url.empty?
@@ -85,7 +85,7 @@ module Saml
         params["Signature"] = encode(signature)
       end
 
-      params.each_pair do |key, value|
+      params.each do |key, value|
         response_params[key] = value.to_s
       end
 

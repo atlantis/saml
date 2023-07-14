@@ -6,6 +6,7 @@ module Saml
 
     # AuthNRequest ID
     property :uuid
+    @login_url : String? = nil
 
     # Initializes the AuthNRequest. An Authrequest Object that is an extension of the SamlMessage class.
     # Asigns an ID, a random uuid.
@@ -23,16 +24,16 @@ module Saml
     # @param params [Hash] Some extra parameters to be added in the GET for example the RelayState
     # @return [String] AuthNRequest string that includes the SAMLRequest
     #
-    def create(settings, params = {} of String => String)
+    def create(settings, params = {} of String => String?)
       params = create_params(settings, params )
       params_prefix = (settings.idp_sso_service_url =~ /\?/) ? "&" : "?"
       saml_request = Saml::Utils.url_encode(params.delete("SAMLRequest"))
       request_params = "#{params_prefix}SAMLRequest=#{saml_request}"
-      params.each_pair do |key, value|
-        request_params << "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
+      params.each do |key, value|
+        request_params += "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
       end
-      raise SettingError.new "Invalid settings, idp_sso_service_url is not set!" if settings.idp_sso_service_url.nil? || settings.idp_sso_service_url.empty?
-      @login_url = settings.idp_sso_service_url + request_params
+      raise SettingError.new "Invalid settings, idp_sso_service_url is not set!" if settings.idp_sso_service_url.nil? || settings.idp_sso_service_url.try(&.empty?)
+      @login_url = settings.idp_sso_service_url.not_nil! + request_params
     end
 
     # Creates the Get parameters for the request.
@@ -40,7 +41,7 @@ module Saml
     # @param params [Hash] Some extra parameters to be added in the GET for example the RelayState
     # @return [Hash] Parameters
     #
-    def create_params(settings, params = {} of String => String)
+    def create_params(settings, params = {} of String => String?)
       unless relay_state = params["RelayState"]?
         params.delete("RelayState")
       end
@@ -54,20 +55,22 @@ module Saml
       base64_request = encode(request)
       request_params = { "SAMLRequest" => base64_request }
 
-      if settings.idp_sso_service_binding == Utils::BINDINGS[:redirect] && settings.security[:authn_requests_signed] && settings.private_key
+      if settings.idp_sso_service_binding == Utils::BINDINGS[:redirect] && settings.security[:authn_requests_signed]? && settings.private_key
         params["SigAlg"] = settings.security[:signature_method].as(String)
         url_string = Saml::Utils.build_query(
-          {type: "SAMLRequest",
-          data: base64_request,
-          relay_state: relay_state,
-          sig_alg: params["SigAlg"],}
+          {
+            type: "SAMLRequest",
+            data: base64_request,
+            relay_state: relay_state,
+            sig_alg: params["SigAlg"],
+          }
         )
         sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
         signature = settings.get_sp_key.sign(sign_algorithm, url_string)
         params["Signature"] = encode(signature)
       end
 
-      params.each_pair do |key, value|
+      params.each do |key, value|
         request_params[key] = value.to_s
       end
 

@@ -32,8 +32,8 @@ module Saml
       params_prefix = (settings.idp_slo_service_url =~ /\?/) ? "&" : "?"
       saml_request = Saml::Utils.url_encode(params.delete("SAMLRequest"))
       request_params = "#{params_prefix}SAMLRequest=#{saml_request}"
-      params.each_pair do |key, value|
-        request_params << "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
+      params.each do |key, value|
+        request_params += "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
       end
       raise SettingError.new "Invalid settings, idp_slo_service_url is not set!" if settings.idp_slo_service_url.nil? || settings.idp_slo_service_url.empty?
       @logout_url = settings.idp_slo_service_url + request_params
@@ -80,7 +80,7 @@ module Saml
         params["Signature"] = encode(signature)
       end
 
-      params.each_pair do |key, value|
+      params.each do |key, value|
         request_params[key] = value.to_s
       end
 

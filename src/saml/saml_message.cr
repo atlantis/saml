@@ -117,7 +117,7 @@ module Saml
     # @param string [String] The string
     # @return [String] The encoded string
     #
-    private def encode(string : String)
+    private def encode(string : String | Slice)
       Base64.strict_encode(string)
     end
 

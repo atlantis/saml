@@ -287,7 +287,7 @@ class Minitest::Test
   # decodes a base64 encoded SAML response for use in SloLogoutresponse tests
   #
   def decode_saml_response_payload(unauth_url)
-    payload = URL.decode(unauth_url.split("SAMLResponse=").last)
+    payload = URI.decode(unauth_url.split("SAMLResponse=").last)
     decoded = Base64.decode(payload)
 
     zstream = Zlib::Inflate.new(-Zlib::MAX_WBITS)
@@ -301,7 +301,7 @@ class Minitest::Test
   # decodes a base64 encoded SAML request for use in Logoutrequest tests
   #
   def decode_saml_request_payload(unauth_url)
-    payload = URL.decode(unauth_url.split("SAMLRequest=").last)
+    payload = URI.decode(unauth_url.split("SAMLRequest=").last)
     decoded = Base64.decode(payload)
 
     zstream = Zlib::Inflate.new(-Zlib::MAX_WBITS)

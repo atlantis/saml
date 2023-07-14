@@ -211,12 +211,12 @@ class RequestTest < Minitest::Test
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA1
 
         query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
-        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
+        query_string += "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string += "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
         signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA1
-        assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
+        assert cert.public_key.verify(signature_algorithm, Base64.decode(params["Signature"]), query_string)
       end
 
       it "create a signature parameter with RSA_SHA256 / SHA256 and validate it" do
@@ -227,12 +227,12 @@ class RequestTest < Minitest::Test
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA256
 
         query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
-        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
+        query_string += "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string += "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
         signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA256
-        assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
+        assert cert.public_key.verify(signature_algorithm, Base64.decode(params["Signature"]), query_string)
       end
 
       it "create a signature parameter with RSA_SHA384 / SHA384 and validate it" do
@@ -243,12 +243,12 @@ class RequestTest < Minitest::Test
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA384
 
         query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
-        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
+        query_string += "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string += "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
         # signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         # assert_equal signature_algorithm, OpenSSL::Digest::SHA384
-        # assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
+        # assert cert.public_key.verify(signature_algorithm, Base64.decode(params["Signature"]), query_string)
       end
 
       it "create a signature parameter with RSA_SHA512 / SHA512 and validate it" do
@@ -259,12 +259,12 @@ class RequestTest < Minitest::Test
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA512
 
         query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
-        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
+        query_string += "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string += "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
         signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA512
-        assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
+        assert cert.public_key.verify(signature_algorithm, Base64.decode(params["Signature"]), query_string)
       end
     end
 
@@ -310,12 +310,12 @@ class RequestTest < Minitest::Test
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA1
 
         query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
-        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
+        query_string += "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string += "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
         signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA1
-        assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
+        assert cert.public_key.verify(signature_algorithm, Base64.decode(params["Signature"]), query_string)
       end
     end
 

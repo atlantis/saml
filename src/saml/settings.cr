@@ -261,7 +261,7 @@ module Saml
 
       if formatted_cert = Saml::Utils.format_cert(certificate)
         if cert = OpenSSL::X509::Certificate.new(formatted_cert)
-          if security[:check_sp_cert_expiration]
+          if security[:check_sp_cert_expiration]?
             if Saml::Utils.is_cert_expired(cert)
               raise Saml::ValidationError.new("The SP certificate expired.")
             end
