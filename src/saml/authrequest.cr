@@ -173,7 +173,7 @@ module Saml
     end
 
     def sign_document(document, settings)
-      if settings.idp_sso_service_binding == Utils::BINDINGS[:post] && settings.security[:authn_requests_signed] && settings.private_key && settings.certificate
+      if settings.idp_sso_service_binding == Utils::BINDINGS[:post] && settings.security[:authn_requests_signed]? && settings.private_key && settings.certificate
         if private_key = settings.get_sp_key
           if cert = settings.get_sp_cert
             document.sign_document(private_key, cert, settings.security[:signature_method].as?(String), settings.security[:digest_method])

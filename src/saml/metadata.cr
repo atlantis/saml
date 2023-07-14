@@ -49,8 +49,8 @@ module Saml
     protected def add_sp_sso_element(root, settings)
       root.add_element "md:SPSSODescriptor", {
         "protocolSupportEnumeration" => "urn:oasis:names:tc:SAML:2.0:protocol",
-        "AuthnRequestsSigned" => settings.security[:authn_requests_signed],
-        "WantAssertionsSigned" => settings.security[:want_assertions_signed],
+        "AuthnRequestsSigned" => settings.security[:authn_requests_signed]?,
+        "WantAssertionsSigned" => settings.security[:want_assertions_signed]?,
       }
     end
 

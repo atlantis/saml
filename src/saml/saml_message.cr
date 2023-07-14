@@ -27,8 +27,8 @@ module Saml
     def version(document)
       @version ||= begin
         if node = document.xpath_node(
-            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
-            { "p" => PROTOCOL }
+            "/p:AuthnRequest | samlp:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            { "p" => PROTOCOL, "samlp" => PROTOCOL }
           )
           node["Version"]
         end
