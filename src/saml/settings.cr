@@ -290,6 +290,8 @@ module Saml
     def get_sp_key
       if key = self.get_sp_key_text
         OpenSSL::PKey::RSA.new(key)
+      else
+        raise "No sp_key"
       end
     end
 
@@ -312,7 +314,7 @@ module Saml
       when :redirect, "redirect"
         Utils::BINDINGS[:redirect]
       else
-        value
+        value.to_s
       end
     end
   end

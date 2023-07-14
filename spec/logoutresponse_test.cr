@@ -231,7 +231,7 @@ class RubySamlTest < Minitest::Test
         it "return true when no idp_cert is provided and option :relax_signature_validation is present" do
           settings.idp_cert = nil
           settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           options[:relax_signature_validation] = true
@@ -242,7 +242,7 @@ class RubySamlTest < Minitest::Test
         it "return false when no idp_cert is provided and no option :relax_signature_validation is present" do
           settings.idp_cert = nil
           settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           logoutresponse_sign_test = Saml::Logoutresponse.new(params["SAMLResponse"], settings, options)
@@ -251,7 +251,7 @@ class RubySamlTest < Minitest::Test
 
         it "return true when valid RSA_SHA1 Signature" do
           settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           logoutresponse_sign_test = Saml::Logoutresponse.new(params["SAMLResponse"], settings, options)
@@ -260,7 +260,7 @@ class RubySamlTest < Minitest::Test
 
         it "return true when valid RSA_SHA256 Signature" do
           settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA256
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           logoutresponse = Saml::Logoutresponse.new(params["SAMLResponse"], settings, options)
@@ -310,8 +310,8 @@ class RubySamlTest < Minitest::Test
           refute_equal(query, original_query)
           assert_equal(URL.decode(query), URL.decode(original_query))
           # Make normalised signature based on our modified params.
-          sign_algorithm = XMLSecurity::BaseDocument.new.algorithm(settings.security[:signature_method])
-          signature = settings.get_sp_key.sign(sign_algorithm.new, query)
+          sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
+          signature = settings.get_sp_key.sign(sign_algorithm, query)
           params["Signature"] = Base64.encode(signature).gsub(/\n/, "")
           # Re-create the Logoutresponse based on these modified parameters,
           # and ask it to validate the signature. It will do it incorrectly,
@@ -346,8 +346,8 @@ class RubySamlTest < Minitest::Test
           refute_equal(query, original_query)
           assert_equal(URL.decode(query), URL.decode(original_query))
           # Make normalised signature based on our modified params.
-          sign_algorithm = XMLSecurity::BaseDocument.new.algorithm(settings.security[:signature_method])
-          signature = settings.get_sp_key.sign(sign_algorithm.new, query)
+          sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
+          signature = settings.get_sp_key.sign(sign_algorithm, query)
           params["Signature"] = Base64.encode(signature).gsub(/\n/, "")
           # Re-create the Logoutresponse based on these modified parameters,
           # and ask it to validate the signature. Provide the altered parameter
@@ -377,7 +377,7 @@ class RubySamlTest < Minitest::Test
         end
 
         it "return true when at least a idp_cert is valid" do
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           settings.idp_cert_multi = {
@@ -389,7 +389,7 @@ class RubySamlTest < Minitest::Test
         end
 
         it "return false when cert expired and check_idp_cert_expiration expired" do
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           settings.security[:check_idp_cert_expiration] = true
@@ -404,7 +404,7 @@ class RubySamlTest < Minitest::Test
         end
 
         it "return false when none cert on idp_cert_multi is valid" do
-          params["RelayState"] = params[:RelayState]
+          params["RelayState"] = params["RelayState"]
           options = {}
           options[:get_params] = params
           settings.idp_cert_multi = {

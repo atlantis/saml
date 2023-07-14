@@ -279,7 +279,7 @@ class RubySamlTest < Minitest::Test
         settings.idp_cert = nil
         settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         options[:relax_signature_validation] = true
@@ -292,7 +292,7 @@ class RubySamlTest < Minitest::Test
         settings.idp_cert = nil
         settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         logout_request_sign_test = Saml::SloLogoutrequest.new(params["SAMLRequest"], options)
@@ -303,7 +303,7 @@ class RubySamlTest < Minitest::Test
       it "return true when valid RSA_SHA1 Signature" do
         settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         logout_request_sign_test = Saml::SloLogoutrequest.new(params["SAMLRequest"], options)
@@ -317,7 +317,7 @@ class RubySamlTest < Minitest::Test
         options = {}
         options[:get_params] = params
         logout_request_sign_test = Saml::SloLogoutrequest.new(params["SAMLRequest"], options)
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         logout_request_sign_test.settings = settings
         assert logout_request_sign_test.send(:validate_signature)
       end
@@ -326,7 +326,7 @@ class RubySamlTest < Minitest::Test
         settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
         params["RelayState"] = "http://invalid.example.com"
-        params[:RelayState] = params["RelayState"]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
 
@@ -340,7 +340,7 @@ class RubySamlTest < Minitest::Test
         settings.soft = false
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
         params["RelayState"] = "http://invalid.example.com"
-        params[:RelayState] = params["RelayState"]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         options[:settings] = settings
@@ -371,8 +371,8 @@ class RubySamlTest < Minitest::Test
         refute_equal(query, original_query)
         assert_equal(URL.decode(query), URL.decode(original_query))
         # Make normalised signature based on our modified params.
-        sign_algorithm = XMLSecurity::BaseDocument.new.algorithm(settings.security[:signature_method])
-        signature = settings.get_sp_key.sign(sign_algorithm.new, query)
+        sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
+        signature = settings.get_sp_key.sign(sign_algorithm, query)
         params["Signature"] = Base64.encode(signature).gsub(/\n/, "")
         # Construct SloLogoutrequest and ask it to validate the signature.
         # It will do it incorrectly, because it will compute it based on re-encoded
@@ -406,8 +406,8 @@ class RubySamlTest < Minitest::Test
         refute_equal(query, original_query)
         assert_equal(URL.decode(query), URL.decode(original_query))
         # Make normalised signature based on our modified params.
-        sign_algorithm = XMLSecurity::BaseDocument.new.algorithm(settings.security[:signature_method])
-        signature = settings.get_sp_key.sign(sign_algorithm.new, query)
+        sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
+        signature = settings.get_sp_key.sign(sign_algorithm, query)
         params["Signature"] = Base64.encode(signature).gsub(/\n/, "")
         # Construct SloLogoutrequest and ask it to validate the signature.
         # Provide the altered parameter in its raw URI-encoded form,
@@ -443,10 +443,10 @@ class RubySamlTest < Minitest::Test
         # Assemble query string.
         query = "SAMLRequest=#{params["SAMLRequest"]}&SigAlg=#{params["SigAlg"]}"
         # Make normalised signature based on our modified params.
-        sign_algorithm = XMLSecurity::BaseDocument.new.algorithm(
+        sign_algorithm = XMLSecurity::BaseDocument.algorithm(
           settings.security[:signature_method]
         )
-        signature = settings.get_sp_key.sign(sign_algorithm.new, query)
+        signature = settings.get_sp_key.sign(sign_algorithm, query)
         params["Signature"] = downcased_escape(Base64.encode(signature).gsub(/\n/, ""))
 
         # Then parameters are usually unescaped, like we manage them in rails
@@ -481,7 +481,7 @@ class RubySamlTest < Minitest::Test
 
       it "return true when at least a idp_cert is valid" do
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         logout_request_sign_test = Saml::SloLogoutrequest.new(params["SAMLRequest"], options)
@@ -495,7 +495,7 @@ class RubySamlTest < Minitest::Test
 
       it "return false when cert expired and check_idp_cert_expiration expired" do
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         settings.security[:check_idp_cert_expiration] = true
@@ -512,7 +512,7 @@ class RubySamlTest < Minitest::Test
 
       it "return false when none cert on idp_cert_multi is valid" do
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
-        params["RelayState"] = params[:RelayState]
+        params["RelayState"] = params["RelayState"]
         options = {}
         options[:get_params] = params
         logout_request_sign_test = Saml::SloLogoutrequest.new(params["SAMLRequest"], options)

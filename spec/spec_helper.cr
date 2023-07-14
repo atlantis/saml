@@ -349,6 +349,6 @@ class Minitest::Test
 
   # Allows to emulate Azure AD request behavior
   def downcased_escape(str)
-    URL.encode(str).gsub(/%[A-Fa-f0-9]{2}/) { |match| match.downcase }
+    Saml::Utils.url_encode(str).gsub(/%[A-Fa-f0-9]{2}/) { |match| match.downcase }
   end
 end

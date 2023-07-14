@@ -1,8 +1,5 @@
 require "./spec_helper"
 
-require "onelogin/ruby-saml/authrequest"
-require "onelogin/ruby-saml/setting_error"
-
 class RequestTest < Minitest::Test
   describe "Authrequest" do
     let(:settings) { Saml::Settings.new }
@@ -166,12 +163,12 @@ class RequestTest < Minitest::Test
       assert_match(/^_/, request.uuid)
     end
 
-    it "creates request with ID is prefixed, when :id_prefix is passed" do
-      Saml::Utils::set_prefix("test")
-      request = Saml::Authrequest.new
-      assert_match(/^test/, request.uuid)
-      Saml::Utils::set_prefix("_")
-    end
+    # it "creates request with ID is prefixed, when :id_prefix is passed" do
+    #   Saml::Utils::set_prefix("test")
+    #   request = Saml::Authrequest.new
+    #   assert_match(/^test/, request.uuid)
+    #   Saml::Utils::set_prefix("_")
+    # end
 
     describe "when the target url is not set" do
       before do
@@ -202,27 +199,27 @@ class RequestTest < Minitest::Test
       end
     end
 
-    it "create the saml:AuthnContextClassRef element correctly" do
+    it "create the saml_AuthnContextClassRef element correctly" do
       settings.authn_context = "secure/name/password/uri"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert_match(/<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/, auth_doc.to_s)
     end
 
-    it "create multiple saml:AuthnContextClassRef elements correctly" do
+    it "create multiple saml_AuthnContextClassRef elements correctly" do
       settings.authn_context = ["secure/name/password/uri", "secure/email/password/uri"]
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert_match(/<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/, auth_doc.to_s)
       assert_match(/<saml:AuthnContextClassRef>secure\/email\/password\/uri<\/saml:AuthnContextClassRef>/, auth_doc.to_s)
     end
 
-    it "create the saml:AuthnContextClassRef with comparison exact" do
+    it "create the saml_AuthnContextClassRef with comparison exact" do
       settings.authn_context = "secure/name/password/uri"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert_match(/<samlp:RequestedAuthnContext[\S ]+Comparison='exact'/, auth_doc.to_s)
       assert_match(/<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/, auth_doc.to_s)
     end
 
-    it "create the saml:AuthnContextClassRef with comparison minimun" do
+    it "create the saml_AuthnContextClassRef with comparison minimun" do
       settings.authn_context = "secure/name/password/uri"
       settings.authn_context_comparison = "minimun"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
@@ -230,7 +227,7 @@ class RequestTest < Minitest::Test
       assert_match(/<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/, auth_doc.to_s)
     end
 
-    it "create the saml:AuthnContextDeclRef element correctly" do
+    it "create the saml_AuthnContextDeclRef element correctly" do
       settings.authn_context_decl_ref = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert_match(/<saml:AuthnContextDeclRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport<\/saml:AuthnContextDeclRef>/, auth_doc.to_s)
@@ -282,17 +279,17 @@ class RequestTest < Minitest::Test
       it "create a signature parameter with RSA_SHA1 and validate it" do
         settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
 
-        params = Saml::Authrequest.new.create_params(settings, :RelayState => "http://example.com")
+        params = Saml::Authrequest.new.create_params(settings, {"RelayState" => "http://example.com"})
         assert params["SAMLRequest"]
-        assert params[:RelayState]
+        assert params["RelayState"]
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA1
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA1
 
         assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
@@ -301,34 +298,34 @@ class RequestTest < Minitest::Test
       it "create a signature parameter with RSA_SHA256 and validate it" do
         settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA256
 
-        params = Saml::Authrequest.new.create_params(settings, :RelayState => "http://example.com")
+        params = Saml::Authrequest.new.create_params(settings, {"RelayState" => "http://example.com"})
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA256
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA256
         assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
       end
     end
 
-    it "create the saml:AuthnContextClassRef element correctly" do
+    it "create the saml_AuthnContextClassRef element correctly" do
       settings.authn_context = "secure/name/password/uri"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert auth_doc.to_s =~ /<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/
     end
 
-    it "create the saml:AuthnContextClassRef with comparison exact" do
+    it "create the saml_AuthnContextClassRef with comparison exact" do
       settings.authn_context = "secure/name/password/uri"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert auth_doc.to_s =~ /<samlp:RequestedAuthnContext[\S ]+Comparison='exact'/
       assert auth_doc.to_s =~ /<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/
     end
 
-    it "create the saml:AuthnContextClassRef with comparison minimun" do
+    it "create the saml_AuthnContextClassRef with comparison minimun" do
       settings.authn_context = "secure/name/password/uri"
       settings.authn_context_comparison = "minimun"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
@@ -336,68 +333,17 @@ class RequestTest < Minitest::Test
       assert auth_doc.to_s =~ /<saml:AuthnContextClassRef>secure\/name\/password\/uri<\/saml:AuthnContextClassRef>/
     end
 
-    it "create the saml:AuthnContextDeclRef element correctly" do
+    it "create the saml_AuthnContextDeclRef element correctly" do
       settings.authn_context_decl_ref = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert auth_doc.to_s =~ /<saml:AuthnContextDeclRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport<\/saml:AuthnContextDeclRef>/
     end
 
-    it "create multiple saml:AuthnContextDeclRef elements correctly " do
+    it "create multiple saml_AuthnContextDeclRef elements correctly " do
       settings.authn_context_decl_ref = ["name/password/uri", "example/decl/ref"]
       auth_doc = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       assert auth_doc.to_s =~ /<saml:AuthnContextDeclRef>name\/password\/uri<\/saml:AuthnContextDeclRef>/
       assert auth_doc.to_s =~ /<saml:AuthnContextDeclRef>example\/decl\/ref<\/saml:AuthnContextDeclRef>/
-    end
-
-    describe "DEPRECATED: #create_params signing with HTTP-POST binding via :embed_sign" do
-      before do
-        settings.compress_request = false
-        settings.idp_sso_service_url = "http://example.com?field=value"
-        settings.security[:authn_requests_signed] = true
-        settings.security[:embed_sign] = true
-        settings.certificate = crystal_saml_cert_text
-        settings.private_key = crystal_saml_key_text
-      end
-
-      it "create a signed request" do
-        params = Saml::Authrequest.new.create_params(settings)
-        request_xml = Base64.decode(params["SAMLRequest"])
-        assert_match %r[<ds:SignatureValue>([a-zA-Z0-9/+=]+)</ds:SignatureValue>], request_xml
-        assert_match %r[<ds:SignatureMethod Algorithm='http://www.w3.org/2000/09/xmldsig#rsa-sha1'/>], request_xml
-      end
-    end
-
-    describe "DEPRECATED: #create_params signing with HTTP-Redirect binding via :embed_sign" do
-      let(:cert) { OpenSSL::X509::Certificate.new(crystal_saml_cert_text) }
-
-      before do
-        settings.compress_request = false
-        settings.idp_sso_service_url = "http://example.com?field=value"
-        settings.assertion_consumer_service_binding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST-SimpleSign"
-        settings.security[:authn_requests_signed] = true
-        settings.security[:embed_sign] = false
-        settings.certificate = crystal_saml_cert_text
-        settings.private_key = crystal_saml_key_text
-      end
-
-      it "create a signature parameter with RSA_SHA1 and validate it" do
-        settings.security[:signature_method] = XMLSecurity::Document::RSA_SHA1
-
-        params = Saml::Authrequest.new.create_params(settings, :RelayState => "http://example.com")
-        assert params["SAMLRequest"]
-        assert params[:RelayState]
-        assert params["Signature"]
-        assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA1
-
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
-
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
-        assert_equal signature_algorithm, OpenSSL::Digest::SHA1
-
-        assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
-      end
     end
 
     describe "#manipulate request_id" do

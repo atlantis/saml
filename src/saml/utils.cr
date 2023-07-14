@@ -42,6 +42,14 @@ module Saml
       end
     end
 
+    def self.url_encode( input : String? )
+      if i = input
+        URI.encode_path(i)
+      else
+        ""
+      end
+    end
+
     # Interprets a ISO8601 duration value relative to a given timestamp.
     #
     # @param duration [String] The duration, as a string.
@@ -134,9 +142,9 @@ module Saml
     def self.build_query(params)
       type, data, relay_state, sig_alg = [:type, :data, :relay_state, :sig_alg].map { |k| params[k] }
 
-      url_string = "#{type}=#{URL.encode(data)}"
-      url_string << "&RelayState=#{URL.encode(relay_state)}" if relay_state
-      url_string << "&SigAlg=#{URL.encode(sig_alg)}"
+      url_string = "#{type}=#{url_encode(data)}"
+      url_string += "&RelayState=#{url_encode(relay_state)}" if relay_state
+      url_string += "&SigAlg=#{url_encode(sig_alg)}"
     end
 
     # Reconstruct a canonical query string from raw URI-encoded parts, to be used in verifying a signature
@@ -152,8 +160,8 @@ module Saml
       type, raw_data, raw_relay_state, raw_sig_alg = [:type, :raw_data, :raw_relay_state, :raw_sig_alg].map { |k| params[k] }
 
       url_string = "#{type}=#{raw_data}"
-      url_string << "&RelayState=#{raw_relay_state}" if raw_relay_state
-      url_string << "&SigAlg=#{raw_sig_alg}"
+      url_string += "&RelayState=#{raw_relay_state}" if raw_relay_state
+      url_string += "&SigAlg=#{raw_sig_alg}"
     end
 
     # Prepare raw GET parameters (build them from normal parameters
@@ -184,7 +192,7 @@ module Saml
     end
 
     def self.escape_request_param(param, lowercase_url_encoding)
-      URL.encode(param).tap do |escaped|
+      url_encode(param).tap do |escaped|
         next unless lowercase_url_encoding
 
         escaped.gsub!(/%[A-Fa-f0-9]{2}/) { |match| match.downcase }
@@ -201,7 +209,7 @@ module Saml
     #
     def self.verify_signature(params)
       cert, sig_alg, signature, query_string = [:cert, :sig_alg, :signature, :query_string].map { |k| params[k] }
-      signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(sig_alg)
+      signature_algorithm = XMLSecurity::BaseDocument.algorithm(sig_alg)
       return cert.public_key.verify(signature_algorithm.new, Base64.decode(signature), query_string)
     end
 

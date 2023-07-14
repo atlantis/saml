@@ -30,10 +30,10 @@ module Saml
     def create(settings, params = {} of Symbol => String)
       params = create_params(settings, params)
       params_prefix = (settings.idp_slo_service_url =~ /\?/) ? "&" : "?"
-      saml_request = URL.encode(params.delete("SAMLRequest"))
+      saml_request = Saml::Utils.url_encode(params.delete("SAMLRequest"))
       request_params = "#{params_prefix}SAMLRequest=#{saml_request}"
       params.each_pair do |key, value|
-        request_params << "&#{key}=#{URL.encode(value.to_s)}"
+        request_params << "&#{key}=#{Saml::Utils.url_encode(value.to_s)}"
       end
       raise SettingError.new "Invalid settings, idp_slo_service_url is not set!" if settings.idp_slo_service_url.nil? || settings.idp_slo_service_url.empty?
       @logout_url = settings.idp_slo_service_url + request_params
@@ -48,7 +48,7 @@ module Saml
       # The method expects :RelayState but sometimes we get 'RelayState' instead.
       # Based on the HashWithIndifferentAccess value in Rails we could experience
       # conflicts so this line will solve them.
-      relay_state = params[:RelayState] || params["RelayState"]
+      relay_state = params["RelayState"] || params["RelayState"]
 
       if relay_state.nil?
         params.delete(:RelayState)
@@ -68,15 +68,15 @@ module Saml
       request_params = { "SAMLRequest" => base64_request }
 
       if settings.idp_slo_service_binding == Utils::BINDINGS[:redirect] && settings.security[:logout_requests_signed] && settings.private_key
-        params["SigAlg"] = settings.security[:signature_method]
+        params["SigAlg"] = settings.security[:signature_method].as(String)
         url_string = Saml::Utils.build_query(
           type: "SAMLRequest",
           data: base64_request,
           relay_state: relay_state,
           sig_alg: params["SigAlg"],
         )
-        sign_algorithm = XMLSecurity::BaseDocument.new.algorithm(settings.security[:signature_method])
-        signature = settings.get_sp_key.sign(sign_algorithm.new, url_string)
+        sign_algorithm = XMLSecurity::BaseDocument.algorithm(settings.security[:signature_method].as(String))
+        signature = settings.get_sp_key.sign(sign_algorithm, url_string)
         params["Signature"] = encode(signature)
       end
 

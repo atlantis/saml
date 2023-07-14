@@ -102,14 +102,14 @@ module Saml
     private def encode_raw_saml(saml, settings)
       saml = deflate(saml) if settings.compress_request
 
-      URL.encode(encode(saml))
+      Saml::Utils.url_encode(encode(saml))
     end
 
     # Base 64 decode method
     # @param string [String] The string message
     # @return [Bytes] The decoded string
     #
-    private def decode(string)
+    private def decode(string : String)
       Base64.decode_string(string)
     end
 
@@ -117,7 +117,7 @@ module Saml
     # @param string [String] The string
     # @return [String] The encoded string
     #
-    private def encode(string)
+    private def encode(string : String)
       Base64.strict_encode(string)
     end
 
@@ -147,8 +147,12 @@ module Saml
     # @param inflated [String] The string
     # @return [String] The deflated string
     #
-    private def deflate(inflated)
-      Compress::Zlib::Deflate.deflate(inflated, 9)[2..-5]
+    private def deflate(inflated : String)
+      deflated = IO::Memory.new
+      Compress::Deflate::Writer.open(deflated) do |writer|
+        writer.write(inflated.to_slice)
+      end
+      deflated.to_slice[2..-5].to_s
     end
   end
 end

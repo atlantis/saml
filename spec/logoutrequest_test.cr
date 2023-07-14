@@ -206,15 +206,15 @@ class RequestTest < Minitest::Test
 
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
         assert params["SAMLRequest"]
-        assert params[:RelayState]
+        assert params["RelayState"]
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA1
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA1
         assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
       end
@@ -226,11 +226,11 @@ class RequestTest < Minitest::Test
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA256
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA256
         assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
       end
@@ -242,11 +242,11 @@ class RequestTest < Minitest::Test
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA384
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        # signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        # signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         # assert_equal signature_algorithm, OpenSSL::Digest::SHA384
         # assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
       end
@@ -258,11 +258,11 @@ class RequestTest < Minitest::Test
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA512
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA512
         assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
       end
@@ -305,15 +305,15 @@ class RequestTest < Minitest::Test
 
         params = Saml::Logoutrequest.new.create_params(settings, :RelayState => "http://example.com")
         assert params["SAMLRequest"]
-        assert params[:RelayState]
+        assert params["RelayState"]
         assert params["Signature"]
         assert_equal params["SigAlg"], XMLSecurity::Document::RSA_SHA1
 
-        query_string = "SAMLRequest=#{URL.encode(params["SAMLRequest"])}"
-        query_string << "&RelayState=#{URL.encode(params[:RelayState])}"
-        query_string << "&SigAlg=#{URL.encode(params["SigAlg"])}"
+        query_string = "SAMLRequest=#{Saml::Utils.url_encode(params["SAMLRequest"])}"
+        query_string << "&RelayState=#{Saml::Utils.url_encode(params["RelayState"])}"
+        query_string << "&SigAlg=#{Saml::Utils.url_encode(params["SigAlg"])}"
 
-        signature_algorithm = XMLSecurity::BaseDocument.new.algorithm(params["SigAlg"])
+        signature_algorithm = XMLSecurity::BaseDocument.algorithm(params["SigAlg"])
         assert_equal signature_algorithm, OpenSSL::Digest::SHA1
         assert cert.public_key.verify(signature_algorithm.new, Base64.decode(params["Signature"]), query_string)
       end
