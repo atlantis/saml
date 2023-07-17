@@ -89,7 +89,6 @@ module Saml
       begin
         inflate(decoded).to_s
       rescue ex
-        #puts "Error while inflate: #{ex.inspect_with_backtrace}"
         decoded.to_s
       end
     end

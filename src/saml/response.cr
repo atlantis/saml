@@ -148,7 +148,7 @@ module Saml
     #
     def sessionindex
       @sessionindex ||= begin
-        if node = xpath_first_from_signed_assertion("/a:AuthnStatement")
+        if node = xpath_first_from_signed_assertion("/saml:AuthnStatement")
           node["SessionIndex"]
         end
       end
@@ -224,7 +224,7 @@ module Saml
     #
     def session_expires_at
       @expires_at ||= begin
-        if node = xpath_first_from_signed_assertion("/a:AuthnStatement")
+        if node = xpath_first_from_signed_assertion("/saml:AuthnStatement")
           parse_time(node, "SessionNotOnOrAfter")
         end
       end
@@ -285,7 +285,7 @@ module Saml
     # @return [XML::Node] Conditions Element if exists
     #
     def conditions
-      @conditions ||= xpath_first_from_signed_assertion("/a:Conditions")
+      @conditions ||= xpath_first_from_signed_assertion("/saml:Conditions")
     end
 
     # Gets the NotBefore Condition Element value.
@@ -370,7 +370,7 @@ module Saml
     #
     def audiences
       @audiences ||= begin
-        if nodes = xpath_from_signed_assertion("/a:Conditions/a:AudienceRestriction/a:Audience")
+        if nodes = xpath_from_signed_assertion("/saml:Conditions/saml:AudienceRestriction/saml:Audience")
           nodes.map { |node| Utils.element_text(node) }.compact.reject(&.empty?)
         else
           [] of String
@@ -714,7 +714,7 @@ module Saml
     private def validate_one_conditions
       return true if options[:skip_conditions]?
 
-      conditions_nodes = xpath_from_signed_assertion("/a:Conditions") || [] of XML::NodeSet
+      conditions_nodes = xpath_from_signed_assertion("/saml:Conditions") || [] of XML::NodeSet
       unless conditions_nodes.size == 1
         error_msg = "The Assertion must include one Conditions element"
         return append_error(error_msg)
@@ -730,7 +730,7 @@ module Saml
     private def validate_one_authnstatement
       return true if options[:skip_authnstatement]?
 
-      authnstatement_nodes = xpath_from_signed_assertion("/a:AuthnStatement") || [] of XML::Node
+      authnstatement_nodes = xpath_from_signed_assertion("/saml:AuthnStatement") || [] of XML::Node
       unless authnstatement_nodes.size == 1
         error_msg = "The Assertion must include one AuthnStatement element"
         return append_error(error_msg)
@@ -821,7 +821,7 @@ module Saml
       return true if options[:skip_subject_confirmation]?
       valid_subject_confirmation = false
 
-      if subject_confirmation_nodes = xpath_from_signed_assertion("/a:Subject/a:SubjectConfirmation")
+      if subject_confirmation_nodes = xpath_from_signed_assertion("/saml:Subject/saml:SubjectConfirmation")
         now = Time.utc
         subject_confirmation_nodes.each do |subject_confirmation|
           if subject_confirmation["Method"]? && subject_confirmation["Method"] != "urn:oasis:names:tc:SAML:2.0:cm:bearer"
@@ -829,8 +829,8 @@ module Saml
           end
 
           confirmation_data_node = subject_confirmation.xpath_node(
-            "a:SubjectConfirmationData",
-            { "a" => ASSERTION }
+            "saml:SubjectConfirmationData",
+            { "saml" => ASSERTION }
           )
 
           next unless confirmation_data_node
@@ -900,8 +900,8 @@ module Saml
         # Check signature nodes
         if sig_elements.nil? || sig_elements.size == 0
           sig_elements = doc.xpath_nodes(
-            "/p:Response/a:Assertion[@ID=$id]/ds:Signature",
-            { "p" => PROTOCOL, "a" => ASSERTION, "ds" => DSIG },
+            "/samlp:Response/saml:Assertion[@ID=$id]/ds:Signature",
+            { "samlp" => PROTOCOL, "saml" => ASSERTION, "ds" => DSIG },
             { "id" => doc.signed_element_id }
           )
         end
@@ -975,11 +975,11 @@ module Saml
     private def name_id_node
       @name_id_node ||=
         begin
-          encrypted_node = xpath_first_from_signed_assertion("/a:Subject/a:EncryptedID")
+          encrypted_node = xpath_first_from_signed_assertion("/saml:Subject/saml:EncryptedID")
           if encrypted_node
             node = decrypt_nameid(encrypted_node)
           else
-            node = xpath_first_from_signed_assertion("/a:Subject/a:NameID")
+            node = xpath_first_from_signed_assertion("/saml:Subject/saml:NameID")
           end
         end
     end
@@ -992,13 +992,13 @@ module Saml
     private def xpath_first_from_signed_assertion(subelt = nil)
       if doc = decrypted_document.nil? ? document : decrypted_document
         node = doc.xpath_node(
-          "/p:Response/a:Assertion[@ID=$id]#{subelt}",
-          { "p" => PROTOCOL, "a" => ASSERTION },
+          "/samlp:Response/saml:Assertion[@ID=$id]#{subelt}",
+          { "samlp" => PROTOCOL, "saml" => ASSERTION },
           { "id" => doc.signed_element_id }
         )
         node ||= doc.xpath_node(
-          "/p:Response[@ID=$id]/a:Assertion#{subelt}",
-          { "p" => PROTOCOL, "a" => ASSERTION },
+          "/samlp:Response[@ID=$id]/saml:Assertion#{subelt}",
+          { "samlp" => PROTOCOL, "saml" => ASSERTION },
           { "id" => doc.signed_element_id }
         )
         node
@@ -1016,14 +1016,14 @@ module Saml
       if doc = decrypted_document.nil? ? document : decrypted_document
 
         nodes = doc.xpath_nodes(
-          "/p:Response/a:Assertion[@ID=$id]#{subelt}",
-          { "p" => PROTOCOL, "a" => ASSERTION },
+          "/samlp:Response/saml:Assertion[@ID=$id]#{subelt}",
+          { "samlp" => PROTOCOL, "saml" => ASSERTION },
           { "id" => doc.signed_element_id }
         )
 
         more_nodes = doc.xpath_nodes(
-          "/p:Response[@ID=$id]/a:Assertion#{subelt}",
-          { "p" => PROTOCOL, "a" => ASSERTION },
+          "/samlp:Response[@ID=$id]/saml:Assertion#{subelt}",
+          { "samlp" => PROTOCOL, "saml" => ASSERTION },
           { "id" => doc.signed_element_id }
         )
 

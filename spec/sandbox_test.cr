@@ -107,106 +107,18 @@ end
 
 class RubySamlTest < Minitest::Test
   describe "Response" do
-    let(:settings) { Saml::Settings.new }
-    let(:response) { Saml::Response.new(response_document_without_recipient) }
-    let(:response_without_attributes) { Saml::Response.new(response_document_without_attributes) }
-    let(:response_with_multiple_attribute_statements) { Saml::Response.new(fixture(:response_with_multiple_attribute_statements)) }
-    let(:response_without_reference_uri) { Saml::Response.new(response_document_without_reference_uri) }
-    let(:response_without_reference_uri_special2) { Saml::SpecialResponse2.new(response_document_without_reference_uri) }
-    let(:response_with_signed_assertion) { Saml::Response.new(response_document_with_signed_assertion) }
-    let(:response_with_ds_namespace_at_the_root) { Saml::Response.new(response_document_with_ds_namespace_at_the_root) }
-    let(:response_unsigned) { Saml::Response.new(response_document_unsigned) }
-    let(:response_unsigned_special2) { Saml::SpecialResponse2.new(response_document_unsigned) }
-    let(:response_wrapped) { Saml::Response.new(response_document_wrapped) }
-    let(:response_wrapped_special2) { Saml::SpecialResponse2.new(response_document_wrapped) }
-    let(:response_wrapped_special3) { Saml::SpecialResponse3.new(response_document_wrapped) }
-    let(:response_multiple_attr_values) { Saml::Response.new(fixture(:response_with_multiple_attribute_values)) }
-    let(:response_valid_signed) { Saml::Response.new(response_document_valid_signed) }
-    let(:response_valid_signed_without_recipient) { Saml::Response.new(response_document_valid_signed, { :skip_recipient_check => true }) }
-    let(:response_valid_signed_without_recipient_special4) { Saml::SpecialResponse4.new(response_document_valid_signed, { :skip_recipient_check => true }) }
-    let(:response_valid_signed_without_x509certificate) { Saml::Response.new(response_document_valid_signed_without_x509certificate) }
-    let(:response_no_id) { Saml::Response.new(read_invalid_response("no_id.xml.base64")) }
-    let(:response_no_version) { Saml::Response.new(read_invalid_response("no_saml2.xml.base64")) }
-    let(:response_multi_assertion) { Saml::Response.new(read_invalid_response("multiple_assertions.xml.base64")) }
-    let(:response_no_conditions) { Saml::Response.new(read_invalid_response("no_conditions.xml.base64")) }
-    let(:response_no_conditions_with_skip) { Saml::Response.new(read_invalid_response("no_conditions.xml.base64"), { :skip_conditions => true }) }
-    let(:response_no_authnstatement) { Saml::Response.new(read_invalid_response("no_authnstatement.xml.base64")) }
-    let(:response_no_authnstatement_with_skip) { Saml::Response.new(read_invalid_response("no_authnstatement.xml.base64"), { :skip_authnstatement => true }) }
-    let(:response_empty_destination) { Saml::Response.new(read_invalid_response("empty_destination.xml.base64")) }
-    let(:response_empty_destination_with_skip) { Saml::Response.new(read_invalid_response("empty_destination.xml.base64"), { :skip_destination => true }) }
-    let(:response_no_status) { Saml::Response.new(read_invalid_response("no_status.xml.base64")) }
-    let(:response_no_statuscode) { Saml::Response.new(read_invalid_response("no_status_code.xml.base64")) }
-    let(:response_statuscode_responder) { Saml::Response.new(read_invalid_response("status_code_responder.xml.base64")) }
-    let(:response_statuscode_responder_and_msg) { Saml::Response.new(read_invalid_response("status_code_responer_and_msg.xml.base64")) }
-    let(:response_double_statuscode) { Saml::Response.new(response_document_double_status_code) }
-    let(:response_encrypted_attrs) { Saml::Response.new(response_document_encrypted_attrs) }
-    let(:response_no_signed_elements) { Saml::Response.new(read_invalid_response("no_signature.xml.base64")) }
-    let(:response_multiple_signed) { Saml::Response.new(read_invalid_response("multiple_signed.xml.base64")) }
-    let(:response_audience_self_closed) { Saml::Response.new(read_response("response_audience_self_closed_tag.xml.base64")) }
-    let(:response_invalid_audience) { Saml::Response.new(read_invalid_response("invalid_audience.xml.base64")) }
-    let(:response_invalid_audience_with_skip) { Saml::Response.new(read_invalid_response("invalid_audience.xml.base64"), { :skip_audience => true }) }
-    let(:response_invalid_signed_element) { Saml::Response.new(read_invalid_response("response_invalid_signed_element.xml.base64")) }
-    let(:response_invalid_issuer_assertion) { Saml::Response.new(read_invalid_response("invalid_issuer_assertion.xml.base64")) }
-    let(:response_invalid_issuer_message) { Saml::Response.new(read_invalid_response("invalid_issuer_message.xml.base64")) }
-    let(:response_no_issuer_response) { Saml::Response.new(read_invalid_response("no_issuer_response.xml.base64")) }
-    let(:response_no_issuer_assertion) { Saml::Response.new(read_invalid_response("no_issuer_assertion.xml.base64")) }
-    let(:response_no_nameid) { Saml::Response.new(read_invalid_response("no_nameid.xml.base64")) }
-    let(:response_empty_nameid) { Saml::Response.new(read_invalid_response("empty_nameid.xml.base64")) }
-    let(:response_wrong_spnamequalifier) { Saml::Response.new(read_invalid_response("wrong_spnamequalifier.xml.base64")) }
-    let(:response_duplicated_attributes) { Saml::Response.new(read_invalid_response("duplicated_attributes.xml.base64")) }
-    let(:response_no_subjectconfirmation_data) { Saml::Response.new(read_invalid_response("no_subjectconfirmation_data.xml.base64")) }
-    let(:response_no_subjectconfirmation_method) { Saml::Response.new(read_invalid_response("no_subjectconfirmation_method.xml.base64")) }
-    let(:response_invalid_subjectconfirmation_inresponse) { Saml::Response.new(read_invalid_response("invalid_subjectconfirmation_inresponse.xml.base64")) }
-    let(:response_invalid_subjectconfirmation_recipient) { Saml::Response.new(read_invalid_response("invalid_subjectconfirmation_recipient.xml.base64")) }
-    let(:response_invalid_subjectconfirmation_nb) { Saml::Response.new(read_invalid_response("invalid_subjectconfirmation_nb.xml.base64")) }
-    let(:response_invalid_subjectconfirmation_noa) { Saml::Response.new(read_invalid_response("invalid_subjectconfirmation_noa.xml.base64")) }
-    let(:response_invalid_signature_position) { Saml::Response.new(read_invalid_response("invalid_signature_position.xml.base64")) }
-    let(:response_encrypted_nameid) { Saml::Response.new(response_document_encrypted_nameid) }
-
     describe "retrieve nameID and attributes from encrypted assertion" do
-      before do
-        settings.idp_cert_fingerprint = "EE:17:4E:FB:A8:81:71:12:0D:2A:78:43:BC:E7:0C:07:58:79:F4:F4"
-        settings.sp_entity_id = "http://rubysaml.com:3000/saml/metadata"
-        settings.assertion_consumer_service_url = "http://rubysaml.com:3000/saml/acs"
-        settings.certificate = crystal_saml_cert_text
-        settings.private_key = crystal_saml_key_text
-      end
+      it "parses populi response" do
+        settings = Saml::Settings.new
+        settings.assertion_consumer_service_url = "https://james.ngrok.io/services/648cf50cd8e846b4f27998c2/saml/receive"
+        settings.idp_cert_fingerprint = "0E:18:1E:A3:27:5D:4D:8D:92:EC:C9:4E:7B:45:1B:D8:61:09:D6:18"
+        raw = "PHNhbWxwOlJlc3BvbnNlIHhtbG5zOnNhbWxwPSJ1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6cHJvdG9jb2wiIHhtbG5zOnNhbWw9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjIuMDphc3NlcnRpb24iIElEPSJfZjIwZjViNThiMzBkNTc4ODNmM2E5M2ExZDcxOTEyZTE5YTAyZjUxNjMwIiBWZXJzaW9uPSIyLjAiIElzc3VlSW5zdGFudD0iMjAyMy0wNy0xNFQyMTowMjoxN1oiIERlc3RpbmF0aW9uPSJodHRwczovL2phbWVzLm5ncm9rLmlvL3NlcnZpY2VzLzY0OGNmNTBjZDhlODQ2YjRmMjc5OThjMi9zYW1sL3JlY2VpdmUiIEluUmVzcG9uc2VUbz0iX2IwODM5MWYzLWIxMWMtNDMxMy1iOTI3LTJkMGQxMTAxNDNiOSI+PHNhbWw6SXNzdWVyPnBvcHVsaS5jbzwvc2FtbDpJc3N1ZXI+PGRzOlNpZ25hdHVyZSB4bWxuczpkcz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC8wOS94bWxkc2lnIyI+CiAgPGRzOlNpZ25lZEluZm8+PGRzOkNhbm9uaWNhbGl6YXRpb25NZXRob2QgQWxnb3JpdGhtPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzEwL3htbC1leGMtYzE0biMiLz4KICAgIDxkczpTaWduYXR1cmVNZXRob2QgQWxnb3JpdGhtPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwLzA5L3htbGRzaWcjcnNhLXNoYTEiLz4KICA8ZHM6UmVmZXJlbmNlIFVSST0iI19mMjBmNWI1OGIzMGQ1Nzg4M2YzYTkzYTFkNzE5MTJlMTlhMDJmNTE2MzAiPjxkczpUcmFuc2Zvcm1zPjxkczpUcmFuc2Zvcm0gQWxnb3JpdGhtPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwLzA5L3htbGRzaWcjZW52ZWxvcGVkLXNpZ25hdHVyZSIvPjxkczpUcmFuc2Zvcm0gQWxnb3JpdGhtPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzEwL3htbC1leGMtYzE0biMiLz48L2RzOlRyYW5zZm9ybXM+PGRzOkRpZ2VzdE1ldGhvZCBBbGdvcml0aG09Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvMDkveG1sZHNpZyNzaGExIi8+PGRzOkRpZ2VzdFZhbHVlPlUwQkhreFFKWXNudjZtRXhsYmpEbHkvUEU2RT08L2RzOkRpZ2VzdFZhbHVlPjwvZHM6UmVmZXJlbmNlPjwvZHM6U2lnbmVkSW5mbz48ZHM6U2lnbmF0dXJlVmFsdWU+VEJNQU9DSGh3RHFaVUFncThISmNhdkdVbStiUm9BakpvVFRwVUpKSm5MbzZMOVVyR2dKWnJaVy85ZWRydVZOU1JONE8yU1BLRFVtdHJNRmNCVGRCTEs0YXFJNlJkdkRjUTJVOXozVjFqd2kza0JwVDQwSksxcE81MDAvK3pkZk1RVFk1ckd4c2dvNTZpbjE3S0lkaUh4OWlTdkhRMitHV0wrNlo2aFo1OW9RSGJNc3NhZnZrMHgrcFd2aktYcE1LSUV5M0lLMnZjNER1dGhoVUtxTnJvVjNJZFBnTFpUSFErbGMxZ3dmR2VNbThuUy9VWm9KOVgyUkhSWk5ybmJtSlJEVDV6bXhpMUovbTZ6dlZjMC9sVkcvRkw1Q0R1em1QNUEwTmVjd0JuZ1lnbktRY2szYjNyajVFZzZFYWVZUjlnUE1mU1ZXVzlnbHBkK0ZvTXZIbFh3PT08L2RzOlNpZ25hdHVyZVZhbHVlPgo8ZHM6S2V5SW5mbz48ZHM6WDUwOURhdGE+PGRzOlg1MDlDZXJ0aWZpY2F0ZT5NSUlFUlRDQ0F5MmdBd0lCQWdJSkFLall5Q1U5L1pic01BMEdDU3FHU0liM0RRRUJCUVVBTUhReEN6QUpCZ05WQkFZVEFsVlRNUXN3Q1FZRFZRUUlFd0pKUkRFUE1BMEdBMVVFQnhNR1RXOXpZMjkzTVJNd0VRWURWUVFLRXdwUWIzQjFiR2tnU1c1ak1SSXdFQVlEVlFRREV3bHdiM0IxYkdrdVkyOHhIakFjQmdrcWhraUc5dzBCQ1FFV0QycGhiV1Z6UUhCdmNIVnNhUzVqYnpBZUZ3MHhOREF4TVRVeE9ESTRNREZhRncweU5EQXhNVFV4T0RJNE1ERmFNSFF4Q3pBSkJnTlZCQVlUQWxWVE1Rc3dDUVlEVlFRSUV3SkpSREVQTUEwR0ExVUVCeE1HVFc5elkyOTNNUk13RVFZRFZRUUtFd3BRYjNCMWJHa2dTVzVqTVJJd0VBWURWUVFERXdsd2IzQjFiR2t1WTI4eEhqQWNCZ2txaGtpRzl3MEJDUUVXRDJwaGJXVnpRSEJ2Y0hWc2FTNWpiekNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFONXViRFB1RjZwNS84MUNLRXhTN05heWhNTzl4c1ZXZkZSOHpHQUtWYXlEaGdQN0R3UVVNK2ZzOE14SUpGWGEyWnUzWVlpV2J3dVZZYWExRFZOT01KNEpyL3d5MkR0eFlPNXE4M0xtWkRDMjZMZ2FxdGhCaDk2RVRUeTRCbzF2Qm5YdWZqSlo3Ym1ZaWRIYjg3ZnU4OStjOFNyQ0pIU2hhUFVrV2kycXJqY3gxeWJocEt5MUdVd0x0RTgvdDVTSXRjLy9La2xHc0dpNnFlMExzd1JNOHBmU3crNm1vUjR0WnhHemNuN2N4Q3kvcEJGdjhYc3EvNHd0Q0E3aDIrRUQzMzZFcGZPdHhHN3RPY0MyR2ZLa3lramszSnpQZTlJZkMrMk8zb2oyNWR2MDdsVTlrUVNmTGM2R1lZZ1lRRXhITjNhMlJKNnVRWUh1b2ljVlIzdThpd2NDQXdFQUFhT0IyVENCMWpBZEJnTlZIUTRFRmdRVWloazAyNDNnU2lmbHhXNUFKVjNPN0h4TVN2VXdnYVlHQTFVZEl3U0JuakNCbTRBVWloazAyNDNnU2lmbHhXNUFKVjNPN0h4TVN2V2hlS1IyTUhReEN6QUpCZ05WQkFZVEFsVlRNUXN3Q1FZRFZRUUlFd0pKUkRFUE1BMEdBMVVFQnhNR1RXOXpZMjkzTVJNd0VRWURWUVFLRXdwUWIzQjFiR2tnU1c1ak1SSXdFQVlEVlFRREV3bHdiM0IxYkdrdVkyOHhIakFjQmdrcWhraUc5dzBCQ1FFV0QycGhiV1Z6UUhCdmNIVnNhUzVqYjRJSkFLall5Q1U5L1pic01Bd0dBMVVkRXdRRk1BTUJBZjh3RFFZSktvWklodmNOQVFFRkJRQURnZ0VCQURSZHd2Z2hYYkJhN0w3d2FSZjBNTzVDVm5iYU5nc1J0cmVTeEN3azlKeHRKUUdSSjU1QUJFYXd0WCt2cENVaE5lZTZRZ0luTVNZNk1Dc3pNVHNwSjFOKzM4OElobzFlQlJ4RW55SlE3VmZ6d1g0Myt3SjRselRVeXQySlhGZzFVUkxIS1F5azc4Rm84ZlFjdTJ5YU85dW1WeDhRcnNyRjVxbVZKR2VDQjAzeUZaMitSaGNQVTFZdUE1WlpVZUdqVFAvdzQ5aHUvYzZCR1ZsTTNEcTJTNGlDV3M2SHpwakF1Q0srVisrN0tzSXNOOVo1TGtOd1JPM1J6dml0czNIcjM3TVMzR01ESk5CNVA5dzRoRGx0bjc3N2RJc3pjM1B1UUVpZVZrWlhXUmZ0cVhUWFMvOWlYQWpBS1BURjIwVXU2L3QxalhkSGtUTXhDVGhaL0w3OGRrST08L2RzOlg1MDlDZXJ0aWZpY2F0ZT48L2RzOlg1MDlEYXRhPjwvZHM6S2V5SW5mbz48L2RzOlNpZ25hdHVyZT48c2FtbHA6U3RhdHVzPjxzYW1scDpTdGF0dXNDb2RlIFZhbHVlPSJ1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6c3RhdHVzOlN1Y2Nlc3MiLz48L3NhbWxwOlN0YXR1cz48c2FtbDpBc3NlcnRpb24geG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiBJRD0iXzUwOTc5YTYxZGJjMTk1NTMwNWVkMzMxZWU3YTY2YTM4MDNiNTg3ODAzNyIgVmVyc2lvbj0iMi4wIiBJc3N1ZUluc3RhbnQ9IjIwMjMtMDctMTRUMjE6MDI6MTdaIj48c2FtbDpJc3N1ZXI+cG9wdWxpLmNvPC9zYW1sOklzc3Vlcj48c2FtbDpTdWJqZWN0PjxzYW1sOk5hbWVJRCBGb3JtYXQ9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjEuMTpuYW1laWQtZm9ybWF0OmVtYWlsQWRkcmVzcyI+amFtZXNAbnNhLmVkdTwvc2FtbDpOYW1lSUQ+PHNhbWw6U3ViamVjdENvbmZpcm1hdGlvbiBNZXRob2Q9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjIuMDpjbTpiZWFyZXIiPjxzYW1sOlN1YmplY3RDb25maXJtYXRpb25EYXRhIE5vdE9uT3JBZnRlcj0iMjAyMy0wNy0xNFQyMTowNzoxN1oiIFJlY2lwaWVudD0iaHR0cHM6Ly9qYW1lcy5uZ3Jvay5pby9zZXJ2aWNlcy82NDhjZjUwY2Q4ZTg0NmI0ZjI3OTk4YzIvc2FtbC9yZWNlaXZlIiBJblJlc3BvbnNlVG89Il9iMDgzOTFmMy1iMTFjLTQzMTMtYjkyNy0yZDBkMTEwMTQzYjkiLz48L3NhbWw6U3ViamVjdENvbmZpcm1hdGlvbj48L3NhbWw6U3ViamVjdD48c2FtbDpDb25kaXRpb25zIE5vdEJlZm9yZT0iMjAyMy0wNy0xNFQyMTowMTo0N1oiIE5vdE9uT3JBZnRlcj0iMjAyMy0wNy0xNFQyMTowNzoxN1oiPjxzYW1sOkF1ZGllbmNlUmVzdHJpY3Rpb24+PHNhbWw6QXVkaWVuY2U+bnNhLndhdGNobWFyay5jbG91ZDwvc2FtbDpBdWRpZW5jZT48L3NhbWw6QXVkaWVuY2VSZXN0cmljdGlvbj48L3NhbWw6Q29uZGl0aW9ucz48c2FtbDpBdXRoblN0YXRlbWVudCBBdXRobkluc3RhbnQ9IjIwMjMtMDctMTRUMjE6MDI6MTdaIiBTZXNzaW9uSW5kZXg9Il9mMzJlOWFkYmI2MzQ3YzMzMTczZjIwZDcxZDM2ZWZlOGE0NTg5OWY5NTYiPjxzYW1sOkF1dGhuQ29udGV4dD48c2FtbDpBdXRobkNvbnRleHRDbGFzc1JlZj51cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6YWM6Y2xhc3NlczpQYXNzd29yZDwvc2FtbDpBdXRobkNvbnRleHRDbGFzc1JlZj48L3NhbWw6QXV0aG5Db250ZXh0Pjwvc2FtbDpBdXRoblN0YXRlbWVudD48c2FtbDpBdHRyaWJ1dGVTdGF0ZW1lbnQ+PHNhbWw6QXR0cmlidXRlIE5hbWU9IkZpcnN0TmFtZSI+PHNhbWw6QXR0cmlidXRlVmFsdWUgeHNpOnR5cGU9InhzOnN0cmluZyI+SmFtZXM8L3NhbWw6QXR0cmlidXRlVmFsdWU+PC9zYW1sOkF0dHJpYnV0ZT48c2FtbDpBdHRyaWJ1dGUgTmFtZT0iTGFzdE5hbWUiPjxzYW1sOkF0dHJpYnV0ZVZhbHVlIHhzaTp0eXBlPSJ4czpzdHJpbmciPkhpbGw8L3NhbWw6QXR0cmlidXRlVmFsdWU+PC9zYW1sOkF0dHJpYnV0ZT48c2FtbDpBdHRyaWJ1dGUgTmFtZT0iRW1haWwiPjxzYW1sOkF0dHJpYnV0ZVZhbHVlIHhzaTp0eXBlPSJ4czpzdHJpbmciPmphbWVzQG5zYS5lZHU8L3NhbWw6QXR0cmlidXRlVmFsdWU+PC9zYW1sOkF0dHJpYnV0ZT48c2FtbDpBdHRyaWJ1dGUgTmFtZT0idXJuOm9pZDowLjkuMjM0Mi4xOTIwMDMwMC4xMDAuMS4zIj48c2FtbDpBdHRyaWJ1dGVWYWx1ZSB4c2k6dHlwZT0ieHM6c3RyaW5nIj5qYW1lc0Buc2EuZWR1PC9zYW1sOkF0dHJpYnV0ZVZhbHVlPjwvc2FtbDpBdHRyaWJ1dGU+PHNhbWw6QXR0cmlidXRlIE5hbWU9InVybjpvaWQ6MC45LjIzNDIuMTkyMDAzMDAuMTAwLjEiPjxzYW1sOkF0dHJpYnV0ZVZhbHVlIHhzaTp0eXBlPSJ4czpzdHJpbmciPmphbWVzPC9zYW1sOkF0dHJpYnV0ZVZhbHVlPjwvc2FtbDpBdHRyaWJ1dGU+PHNhbWw6QXR0cmlidXRlIE5hbWU9IlBvcHVsaUlEIj48c2FtbDpBdHRyaWJ1dGVWYWx1ZSB4c2k6dHlwZT0ieHM6aW50ZWdlciI+ODQ2NTwvc2FtbDpBdHRyaWJ1dGVWYWx1ZT48L3NhbWw6QXR0cmlidXRlPjwvc2FtbDpBdHRyaWJ1dGVTdGF0ZW1lbnQ+PC9zYW1sOkFzc2VydGlvbj48L3NhbWxwOlJlc3BvbnNlPg=="
+        response = Saml::Response.new(Base64.decode_string(raw), {:settings => settings})
 
-      it "is possible when signed_message_encrypted_unsigned_assertion" do
-        response = Saml::Response.new(signed_message_encrypted_unsigned_assertion, {:settings => settings})
-        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
+        Timecop.travel(Time.parse_rfc3339("2023-07-14 21:07:17Z")) do
+          response.is_valid?
+          puts "ERRORS: #{response.errors.inspect}"
           assert response.is_valid?
-          assert_empty response.errors
-          assert_equal "test", response.attributes[:uid].first
-          assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
-        end
-      end
-
-      it "is possible when signed_message_encrypted_signed_assertion" do
-        response = Saml::Response.new(signed_message_encrypted_signed_assertion, {:settings => settings})
-        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
-          assert response.is_valid?
-          assert_empty response.errors
-          assert_equal "test", response.attributes[:uid].first
-          assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
-        end
-      end
-
-      it "is possible when unsigned_message_encrypted_signed_assertion" do
-        response = Saml::Response.new(unsigned_message_encrypted_signed_assertion,{ :settings => settings})
-        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
-          assert response.is_valid?
-           assert_empty response.errors
-          assert_equal "test", response.attributes[:uid].first
-          assert_equal "98e2bb61075e951b37d6b3be6954a54b340d86c7", response.nameid
-        end
-      end
-
-      it "is not possible when unsigned_message_encrypted_unsigned_assertion" do
-        response = Saml::Response.new(unsigned_message_encrypted_unsigned_assertion, {:settings => settings})
-        Timecop.travel(Time.parse_rfc3339("2015-03-19T14:30:31Z")) do
-          assert !response.is_valid?
-          assert_includes response.errors, "Found an unexpected number of Signature Element. SAML Response rejected"
         end
       end
     end
