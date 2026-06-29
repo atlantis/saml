@@ -378,12 +378,10 @@ module XMLSecurity
 
             if method_node = ref.xpath_node("//ds:DigestMethod",{ "ds" => DSIG })
               digest_algorithm = BaseDocument.algorithm(method_node)
-puts "HAHED: #{hashed_element.to_xml(options: XML::SaveOptions::NO_EMPTY)}"
               # have to make sure to disable formatting!
               if referenced_element = XML.parse("<root>#{hashed_element.to_xml(options: XML::SaveOptions::NO_EMPTY)}</root>")
                 if referenced_element_canonical_content = referenced_element.canonicalize(mode: canon_algorithm, inclusive_ns: inclusive_namespaces).try &.to_s
                   referenced_element_canonical_content = referenced_element_canonical_content.gsub("<root>", "").gsub("</root>", "").strip
-puts "referenced_element_canonical_content: #{referenced_element_canonical_content}\n\n"
                   digest_algorithm << referenced_element_canonical_content
                   hash = digest_algorithm.final
 
@@ -402,8 +400,6 @@ puts "referenced_element_canonical_content: #{referenced_element_canonical_conte
         else
           return append_error("Couldn't find Reference element", soft)
         end
-puts "hash #{Base64.encode(hash.not_nil!)}\n\n"
-puts "digest value #{Base64.encode(digest_value.not_nil!)}\n\n"
         unless digests_match?(hash, digest_value)
           return append_error("Digest mismatch", soft)
         end
