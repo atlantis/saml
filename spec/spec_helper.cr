@@ -1,4 +1,3 @@
-require "spec"
 require "timecop"
 require "minitest/autorun"
 require "../src/saml"
@@ -209,21 +208,11 @@ class Minitest::Test
   end
 
   def logout_request_document
-    unless @logout_request_document
-      xml = read_logout_request("slo_request.xml")
-      deflated = Zlib::Deflate.deflate(xml, 9)[2..-5]
-      @logout_request_document = Base64.encode(deflated)
-    end
-    @logout_request_document
+    @logout_request_document ||= Base64.encode(deflate(read_logout_request("slo_request.xml")))
   end
 
   def logout_request_document_with_name_id_format
-    unless @logout_request_document_with_name_id_format
-      xml = read_logout_request("slo_request_with_name_id_format.xml")
-      deflated = Zlib::Deflate.deflate(xml, 9)[2..-5]
-      @logout_request_document_with_name_id_format = Base64.encode(deflated)
-    end
-    @logout_request_document_with_name_id_format
+    @logout_request_document_with_name_id_format ||= Base64.encode(deflate(read_logout_request("slo_request_with_name_id_format.xml")))
   end
 
   def logout_request_xml_with_session_index
@@ -231,12 +220,7 @@ class Minitest::Test
   end
 
   def invalid_logout_request_document
-    unless @invalid_logout_request_document
-      xml = File.read(File.join(File.dirname(__FILE__), "logout_requests", "invalid_slo_request.xml"))
-      deflated = Zlib::Deflate.deflate(xml, 9)[2..-5]
-      @invalid_logout_request_document = Base64.encode(deflated)
-    end
-    @invalid_logout_request_document
+    @invalid_logout_request_document ||= Base64.encode(deflate(read_logout_request("invalid_slo_request.xml")))
   end
 
   def logout_request_base64
@@ -255,9 +239,12 @@ class Minitest::Test
     @crystal_saml_cert2 ||= OpenSSL::X509::Certificate.new(crystal_saml_cert_text2)
   end
 
-  def crystal_saml_cert_fingerprint
-    @crystal_saml_cert_fingerprint ||= Digest::SHA1.hexdigest(Base64.decode(XMLSecurity::BaseDocument.pem_to_der(crystal_saml_cert.to_pem))).scan(/../).map{|r|r[0]}.join(":")
-    @crystal_saml_cert_fingerprint.not_nil!
+  def crystal_saml_cert_fingerprint : String
+    @crystal_saml_cert_fingerprint ||= begin
+      digest = OpenSSL::Digest.new("SHA1")
+      digest << crystal_saml_cert.to_der
+      digest.hexfinal.scan(/../).map(&.[0]).join(":")
+    end
   end
 
   def crystal_saml_cert_text
@@ -283,72 +270,51 @@ class Minitest::Test
     "_#{Saml::Utils.uuid}"
   end
 
-  #
+  # Raw deflate, as the HTTP-Redirect binding uses.
+  def deflate(xml : String) : Bytes
+    io = IO::Memory.new
+    Compress::Deflate::Writer.open(io, level: Compress::Deflate::BEST_COMPRESSION) { |writer| writer.write(xml.to_slice) }
+    io.to_slice
+  end
+
+  def inflate(data : Bytes) : String
+    Compress::Deflate::Reader.open(IO::Memory.new(data)) { |reader| reader.gets_to_end }
+  end
+
   # decodes a base64 encoded SAML response for use in SloLogoutresponse tests
-  #
-  def decode_saml_response_payload(unauth_url)
-    payload = URI.decode(unauth_url.split("SAMLResponse=").last)
-    decoded = Base64.decode(payload)
-
-    zstream = Zlib::Inflate.new(-Zlib::MAX_WBITS)
-    inflated = zstream.inflate(decoded)
-    zstream.finish
-    zstream.close
-    inflated
+  def decode_saml_response_payload(unauth_url : String) : String
+    payload = URI.decode_www_form(unauth_url.split("SAMLResponse=").last.split("&").first)
+    inflate(Base64.decode(payload))
   end
 
-  #
   # decodes a base64 encoded SAML request for use in Logoutrequest tests
-  #
-  def decode_saml_request_payload(unauth_url)
-    payload = URI.decode(unauth_url.split("SAMLRequest=").last)
-    decoded = Base64.decode(payload)
-
-    zstream = Zlib::Inflate.new(-Zlib::MAX_WBITS)
-    inflated = zstream.inflate(decoded)
-    zstream.finish
-    zstream.close
-    inflated
+  def decode_saml_request_payload(unauth_url : String) : String
+    payload = URI.decode_www_form(unauth_url.split("SAMLRequest=").last.split("&").first)
+    inflate(Base64.decode(payload))
   end
 
-  SCHEMA_DIR = File.expand_path(File.join(__FILE__, "../../lib/schemas"))
-
-  #
-  # validate an xml document against the given schema
-  #
-  def validate_xml!(document : String, schema)
-    begin
-      # TODO: Maybe rewrite the file paths to xsds?
-      XML.parse(document, XML::ParserOptions::DTDVALID)
-      true
-    rescue ex
-      raise "Schema validation failed! XSD validation errors: #{ex.message}"
-    end
-    # Dir.chdir(SCHEMA_DIR) do
-    #   xsd = if schema.is_a? Nokogiri::XML::Schema
-    #           schema
-    #         else
-    #           Nokogiri::XML::Schema(File.read(schema))
-    #         end
-
-    #   xml = if document.is_a? Nokogiri::XML::Document
-    #           document
-    #         else
-    #           Nokogiri::XML(document) { |c| c.strict }
-    #         end
-
-    #   result = xsd.validate(xml)
-
-    #   if result.size != 0
-    #     raise "Schema validation failed! XSD validation errors: #{result.join(", ")}"
-    #   else
-    #     true
-    #   end
-    # end
+  # Validates against the XSDs the library ships (protocol or metadata).
+  def validate_xml!(document : String, schema : String) : Bool
+    errors = Saml::Schema.validate(Saml::XMLUtil.safe_parse(document), schema)
+    raise "Schema validation failed! XSD validation errors: #{errors.join(", ")}" unless errors.empty?
+    true
   end
 
   # Allows to emulate Azure AD request behavior
   def downcased_escape(str)
     Saml::Utils.url_encode(str).gsub(/%[A-Fa-f0-9]{2}/) { |match| match.downcase }
   end
+
+  # Text of the first node matching *path*, nil when none.
+  def xpath_text(doc : XML::Node, path : String, ns = TEST_NAMESPACES) : String?
+    doc.xpath_node(path, ns).try(&.content)
+  end
 end
+
+TEST_NAMESPACES = {
+  "md"    => "urn:oasis:names:tc:SAML:2.0:metadata",
+  "saml"  => "urn:oasis:names:tc:SAML:2.0:assertion",
+  "samlp" => "urn:oasis:names:tc:SAML:2.0:protocol",
+  "ds"    => "http://www.w3.org/2000/09/xmldsig#",
+  "xenc"  => "http://www.w3.org/2001/04/xmlenc#",
+}

@@ -1,27 +1,28 @@
 module Saml
   module ErrorHandling
-    property errors_messages = [] of String
+    @error_messages = [] of String
 
-    # Append the cause to the errors array, and based on the value of soft, return false or raise
-    # an exception. soft_override is provided as a means of overriding the object's notion of
-    # soft for just this invocation.
-    def append_error(error_msg : String, soft_override : Bool? = nil)
+    # Appends the error and, unless soft, raises it as a ValidationError.
+    # *soft_override* replaces the object's own soft setting for this call.
+    def append_error(error_msg : String, soft_override : Bool? = nil) : Bool
       @error_messages << error_msg
 
-      soft = self.responds_to?(:soft) ? self.soft : true
-      unless soft_override.nil? ? soft : soft_override
-        raise ValidationError.new(error_msg)
-      end
+      soft = if soft_override.nil?
+               responds_to?(:soft) ? (self.soft != false) : true
+             else
+               soft_override
+             end
+      raise ValidationError.new(error_msg) unless soft
 
       false
     end
 
-    # Reset the errors array
+    # Clears in place: documents share this array.
     def reset_errors!
-      @error_messages = [] of String
+      @error_messages.clear
     end
 
-    def errors
+    def errors : Array(String)
       @error_messages
     end
   end

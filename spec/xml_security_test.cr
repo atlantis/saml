@@ -2,11 +2,13 @@ require "./spec_helper"
 
 describe "XmlSecurity" do
   @base64cert : String?
+  @decoded_response : String?
   @document : XMLSecurity::SignedDocument?
+  @settings : Saml::Settings?
 
   let(:decoded_response) { Base64.decode_string(response_document_without_recipient) }
   let(:document) { XMLSecurity::SignedDocument.new(decoded_response) }
-  let(:settings) { Saml::Settings.new() }
+  let(:settings) { Saml::Settings.new }
 
   before do
     @base64cert = document.xpath_node("//ds:X509Certificate", {"ds" => XMLSecurity::BaseDocument::DSIG}).try(&.text)
@@ -23,7 +25,7 @@ describe "XmlSecurity" do
   end
 
   it "not raise an error when softly validating the document multiple times" do
-    2.times { assert_equal document.validate_signature(@base64cert, true), false }
+    2.times { assert_equal false, document.validate_signature(@base64cert, true) }
   end
 
   it "not raise an error when softly validating the document and the X509Certificate is missing" do
@@ -50,14 +52,14 @@ describe "XmlSecurity" do
 
   it "should raise Key validation error" do
     replaced = decoded_response.gsub("<ds:DigestValue>pJQ7MS/ek4KRRWGmv/H43ReHYMs=</ds:DigestValue>",
-                          "<ds:DigestValue>b9xsAXLsynugg3Wc1CI3kpWku+0=</ds:DigestValue>")
+      "<ds:DigestValue>b9xsAXLsynugg3Wc1CI3kpWku+0=</ds:DigestValue>")
     mod_document = XMLSecurity::SignedDocument.new(replaced)
     base64cert = mod_document.xpath_node("//ds:X509Certificate", {"ds" => XMLSecurity::BaseDocument::DSIG}).try(&.text)
     exception = assert_raises(Saml::ValidationError) do
       mod_document.validate_signature(base64cert, false)
     end
-    assert_equal("Digest mismatch", exception.message)
-    assert_includes mod_document.errors, "Digest mismatch"
+    assert_equal("Key validation error", exception.message)
+    assert_includes mod_document.errors, "Key validation error"
   end
 
   it "correctly obtain the digest method with alternate namespace declaration" do
@@ -82,7 +84,7 @@ describe "XmlSecurity" do
   end
 end
 
-describe "#canon_algorithm" do
+describe "XmlSecurity canon_algorithm" do
   it "C14N_EXCLUSIVE_1_0" do
     canon_algorithm = XML::C14N::Mode::C14N_EXCLUSIVE_1_0
     assert_equal canon_algorithm, XMLSecurity::BaseDocument.canon_algorithm("http://www.w3.org/2001/10/xml-exc-c14n#")
@@ -103,35 +105,38 @@ describe "#canon_algorithm" do
   end
 end
 
-describe "#algorithm" do
+describe "XmlSecurity algorithm" do
+  def digest_name(uri)
+    XMLSecurity::BaseDocument.algorithm(uri).name
+  end
+
   it "SHA1" do
-    alg = OpenSSL::Digest::SHA1
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2000/09/xmldsig#rsa-sha1").class
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2000/09/xmldsig#sha1").class
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("other").class
+    assert_equal "SHA1", digest_name("http://www.w3.org/2000/09/xmldsig#rsa-sha1")
+    assert_equal "SHA1", digest_name("http://www.w3.org/2000/09/xmldsig#sha1")
+    assert_equal "SHA1", digest_name("other")
   end
 
   it "SHA256" do
-    alg = OpenSSL::Digest::SHA256
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256").class
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2001/04/xmldsig-more#sha256").class
+    assert_equal "SHA256", digest_name("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256")
+    assert_equal "SHA256", digest_name("http://www.w3.org/2001/04/xmldsig-more#sha256")
   end
 
-  # it "SHA384" do
-  #   alg = OpenSSL::Digest::SHA384
-  #   assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha384")
-  #   assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2001/04/xmldsig-more#sha384")
-  # end
+  it "SHA384" do
+    assert_equal "SHA384", digest_name("http://www.w3.org/2001/04/xmldsig-more#rsa-sha384")
+    assert_equal "SHA384", digest_name("http://www.w3.org/2001/04/xmldsig-more#sha384")
+  end
 
   it "SHA512" do
-    alg = OpenSSL::Digest::SHA512
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha512").class
-    assert_equal alg, XMLSecurity::BaseDocument.algorithm("http://www.w3.org/2001/04/xmldsig-more#sha512").class
+    assert_equal "SHA512", digest_name("http://www.w3.org/2001/04/xmldsig-more#rsa-sha512")
+    assert_equal "SHA512", digest_name("http://www.w3.org/2001/04/xmldsig-more#sha512")
   end
 end
 
-describe "Fingerprint Algorithms" do
-  let(:response_fingerprint_test) { Saml::Response.new(fixture(:adfs_response_sha1, false)) }
+describe "XmlSecurity Fingerprint Algorithms" do
+  @response_fingerprint_test : Saml::Response?
+
+  # Same certificate as adfs_response_sha1, whose non-standard xmlenc#sha1 DigestMethod is now refused.
+  let(:response_fingerprint_test) { Saml::Response.new(fixture(:adfs_response_sha512, false)) }
 
   it "validate using SHA1" do
     sha1_fingerprint = "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72"
@@ -151,12 +156,12 @@ describe "Fingerprint Algorithms" do
     assert response_fingerprint_test.document.validate_document(sha256_fingerprint, true, {:fingerprint_alg => XMLSecurity::Document::SHA256})
   end
 
-  # it "validate using SHA384" do
-  #   sha384_fingerprint = "98:FE:17:90:31:E7:68:18:8A:65:4D:DA:F5:76:E2:09:97:BE:8B:E3:7E:AA:8D:63:64:7C:0C:38:23:9A:AC:A2:EC:CE:48:A6:74:4D:E0:4C:50:80:40:B4:8D:55:14:14"
+  it "validate using SHA384" do
+    sha384_fingerprint = "98:FE:17:90:31:E7:68:18:8A:65:4D:DA:F5:76:E2:09:97:BE:8B:E3:7E:AA:8D:63:64:7C:0C:38:23:9A:AC:A2:EC:CE:48:A6:74:4D:E0:4C:50:80:40:B4:8D:55:14:14"
 
-  #   assert !response_fingerprint_test.document.validate_document(sha384_fingerprint)
-  #   assert response_fingerprint_test.document.validate_document(sha384_fingerprint, true, {:fingerprint_alg => XMLSecurity::Document::SHA384})
-  # end
+    assert !response_fingerprint_test.document.validate_document(sha384_fingerprint)
+    assert response_fingerprint_test.document.validate_document(sha384_fingerprint, true, {:fingerprint_alg => XMLSecurity::Document::SHA384})
+  end
 
   it "validate using SHA512" do
     sha512_fingerprint = "5A:AE:BA:D0:BA:9D:1E:25:05:01:1E:1A:C9:E9:FF:DB:ED:FA:6E:F7:52:EB:45:49:BD:DB:06:D8:A3:7E:CC:63:3A:04:A2:DD:DF:EE:61:05:D9:58:95:2A:77:17:30:4B:EB:4A:9F:48:4A:44:1C:D0:9E:0B:1E:04:77:FD:A3:D2"
@@ -166,7 +171,7 @@ describe "Fingerprint Algorithms" do
   end
 end
 
-describe "Signature Algorithms" do
+describe "XmlSecurity Signature Algorithms" do
   it "validate using SHA1" do
     document = XMLSecurity::SignedDocument.new(fixture(:adfs_response_sha1, false))
     assert document.validate_document("F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72")
@@ -177,10 +182,10 @@ describe "Signature Algorithms" do
     assert document.validate_document("28:74:9B:E8:1F:E8:10:9C:A8:7C:A9:C3:E3:C5:01:6C:92:1C:B4:BA")
   end
 
-  # it "validate using SHA384" do
-  #   document = XMLSecurity::SignedDocument.new(fixture(:adfs_response_sha384, false))
-  #   assert document.validate_document("F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72")
-  # end
+  it "validate using SHA384" do
+    document = XMLSecurity::SignedDocument.new(fixture(:adfs_response_sha384, false))
+    assert document.validate_document("F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72")
+  end
 
   it "validate using SHA512" do
     document = XMLSecurity::SignedDocument.new(fixture(:adfs_response_sha512, false))
@@ -188,49 +193,32 @@ describe "Signature Algorithms" do
   end
 end
 
-describe "XmlSecurity::SignedDocument" do
-  let(:settings) { Saml::Settings.new() }
+describe "XmlSecurity SignedDocument" do
+  @settings : Saml::Settings?
+
+  let(:settings) { Saml::Settings.new }
 
   describe "#extract_inclusive_namespaces" do
     it "support explicit namespace resolution for exclusive canonicalization" do
-      response = fixture(:open_saml_response, false)
-      document = XMLSecurity::SignedDocument.new(response)
-      inclusive_namespaces = document.extract_inclusive_namespaces_for_test
-
-      assert_equal %w[ xs ], inclusive_namespaces
+      document = XMLSecurity::SignedDocument.new(fixture(:open_saml_response, false))
+      assert_equal %w[xs], document.extract_inclusive_namespaces_for_test
     end
 
     it "support implicit namespace resolution for exclusive canonicalization" do
-      response = fixture(:no_signature_ns, false)
-      document = XMLSecurity::SignedDocument.new(response)
-      inclusive_namespaces = document.extract_inclusive_namespaces_for_test
-
-      assert_equal %w[ #default saml ds xs xsi ], inclusive_namespaces
+      document = XMLSecurity::SignedDocument.new(fixture(:no_signature_ns, false))
+      assert_equal %w[#default saml ds xs xsi], document.extract_inclusive_namespaces_for_test
     end
-
-    # it "support inclusive canonicalization" do
-    #   skip("test not yet implemented")
-    #   response = Saml::Response.new(fixture("tdnf_response.xml"))
-    #   response.stubs(:conditions).returns(nil)
-    #   assert !response.is_valid?
-    #   assert !response.is_valid?
-    #   response.settings = settings
-    #   assert !response.is_valid?
-    #   settings.idp_cert_fingerprint = "e6 38 9a 20 b7 4f 13 db 6a bc b1 42 6a e7 52 1d d6 56 d4 1b".upcase.gsub(" ", ":")
-    #   assert response.is_valid?
-    # end
 
     it "return nil when inclusive namespace element is missing" do
       response = fixture(:no_signature_ns, false)
       response = response.sub "<InclusiveNamespaces xmlns=\"http://www.w3.org/2001/10/xml-exc-c14n#\" PrefixList=\"#default saml ds xs xsi\"/>", ""
 
       document = XMLSecurity::SignedDocument.new(response)
-      inclusive_namespaces = document.extract_inclusive_namespaces_for_test
-      assert inclusive_namespaces.empty?
+      assert_empty document.extract_inclusive_namespaces_for_test
     end
   end
 
-  describe "XMLSecurity::DSIG" do
+  describe "signing (XMLSecurity DSIG)" do
     before do
       settings.idp_sso_service_url = "https://idp.example.com/sso"
       settings.protocol_binding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
@@ -243,13 +231,11 @@ describe "XmlSecurity::SignedDocument" do
     it "sign an AuthNRequest" do
       request = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       request.sign_document(crystal_saml_key, crystal_saml_cert)
-      # verify our signature
       signed_doc = XMLSecurity::SignedDocument.new(request.to_s)
       assert signed_doc.validate_document(crystal_saml_cert_fingerprint, false)
 
       request2 = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       request2.sign_document(crystal_saml_key, crystal_saml_cert_text)
-      # verify our signature
       signed_doc2 = XMLSecurity::SignedDocument.new(request2.to_s)
       assert signed_doc2.validate_document(crystal_saml_cert_fingerprint, false)
     end
@@ -257,8 +243,6 @@ describe "XmlSecurity::SignedDocument" do
     it "sign an AuthNRequest with certificate as text" do
       request = Saml::Authrequest.new.create_authentication_xml_doc(settings)
       request.sign_document(crystal_saml_key, crystal_saml_cert_text)
-
-      # verify our signature
       signed_doc = XMLSecurity::SignedDocument.new(request.to_s)
       assert signed_doc.validate_document(crystal_saml_cert_fingerprint, false)
     end
@@ -266,165 +250,148 @@ describe "XmlSecurity::SignedDocument" do
     it "sign a LogoutRequest" do
       logout_request = Saml::Logoutrequest.new.create_logout_request_xml_doc(settings)
       logout_request.sign_document(crystal_saml_key, crystal_saml_cert)
-      # verify our signature
       signed_doc = XMLSecurity::SignedDocument.new(logout_request.to_s)
       assert signed_doc.validate_document(crystal_saml_cert_fingerprint, false)
 
       logout_request2 = Saml::Logoutrequest.new.create_logout_request_xml_doc(settings)
       logout_request2.sign_document(crystal_saml_key, crystal_saml_cert_text)
-      # verify our signature
       signed_doc2 = XMLSecurity::SignedDocument.new(logout_request2.to_s)
-      signed_doc2.validate_document(crystal_saml_cert_fingerprint, false)
       assert signed_doc2.validate_document(crystal_saml_cert_fingerprint, false)
     end
 
     it "sign a LogoutResponse" do
       logout_response = Saml::SloLogoutresponse.new.create_logout_response_xml_doc(settings, "request_id_example", "Custom Logout Message")
       logout_response.sign_document(crystal_saml_key, crystal_saml_cert)
-      # verify our signature
       signed_doc = XMLSecurity::SignedDocument.new(logout_response.to_s)
       assert signed_doc.validate_document(crystal_saml_cert_fingerprint, false)
 
       logout_response2 = Saml::SloLogoutresponse.new.create_logout_response_xml_doc(settings, "request_id_example", "Custom Logout Message")
       logout_response2.sign_document(crystal_saml_key, crystal_saml_cert_text)
-      # verify our signature
       signed_doc2 = XMLSecurity::SignedDocument.new(logout_response2.to_s)
-      signed_doc2.validate_document(crystal_saml_cert_fingerprint, false)
       assert signed_doc2.validate_document(crystal_saml_cert_fingerprint, false)
+    end
+
+    it "verifies a signed document only with the matching certificate" do
+      request = Saml::Authrequest.new.create_authentication_xml_doc(settings)
+      request.sign_document(crystal_saml_key, crystal_saml_cert, XMLSecurity::Document::RSA_SHA256, XMLSecurity::Document::SHA256)
+      signed_doc = XMLSecurity::SignedDocument.new(request.to_s)
+      assert signed_doc.validate_document_with_cert(crystal_saml_cert, false)
+      refute XMLSecurity::SignedDocument.new(request.to_s).validate_document_with_cert(crystal_saml_cert2)
     end
   end
 
   describe "StarfieldTMS" do
-    def response
-      Saml::Response.new(fixture(:starfield_response))
-    end
+    @response : Saml::Response?
 
-    before do
-      response.settings = Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"})
+    let(:response) do
+      Saml::Response.new(fixture(:starfield_response), {
+        :settings => Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"}),
+      })
     end
 
     it "be able to validate a good response" do
-      Timecop.travel( Time.parse_rfc3339("2012-11-28 17:55:00Z") ) do
+      Timecop.freeze(Time.parse_rfc3339("2012-11-28T17:55:00Z")) do
         r = Saml::Response.new(
           fixture(:starfield_response),
           {
-            :skip_subject_confirmation => true.as(Saml::Response::OptionValue),
-            :settings => Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"})
+            :skip_subject_confirmation => true,
+            :settings                  => Saml::Settings.new({:idp_cert_fingerprint => "8D:BA:53:8E:A3:B6:F9:F1:69:6C:BB:D9:D8:BD:41:B3:AC:4F:9D:4D"}),
           }
         )
-        r.is_valid?
-        assert r.is_valid?
+        assert r.is_valid?, r.errors.join(", ")
       end
     end
 
     it "fail before response is valid" do
-      Timecop.travel( Time.parse_rfc3339("2012-11-20 17:55:00Z") ) do
+      Timecop.freeze(Time.parse_rfc3339("2012-11-20T17:55:00Z")) do
         r = response
         assert !r.is_valid?
-
-        time_1 = "2012-11-20 17:55:00 UTC < 2012-11-28 17:53:45 UTC"
-        time_2 = "Tue Nov 20 17:55:00 UTC 2012 < Wed Nov 28 17:53:45 UTC 2012"
-
-        errors = [time_1, time_2].map do |time|
-          "Current time is earlier than NotBefore condition (#{time} - 1s)"
-        end
-
-        assert((r.errors & errors).any?)
+        assert_includes r.errors, "Current time is earlier than NotBefore condition (2012-11-20 17:55:00 UTC < 2012-11-28 17:53:45 UTC - 1s)"
       end
     end
 
     it "fail after response expires" do
-      Timecop.travel( Time.parse_rfc3339("2012-11-30 17:55:00Z") ) do
+      Timecop.freeze(Time.parse_rfc3339("2012-11-30T17:55:00Z")) do
         r = response
         assert !r.is_valid?
-
-        contains_expected_error = r.errors.includes?("Current time is on or after NotOnOrAfter condition (2012-11-30 17:55:00 UTC >= 2012-11-28 18:33:45 UTC + 1s)")
-        contains_expected_error ||= r.errors.includes?("Current time is on or after NotOnOrAfter condition (Fri Nov 30 17:55:00 UTC 2012 >= Wed Nov 28 18:33:45 UTC 2012 + 1s)")
-        assert contains_expected_error
+        assert_includes r.errors, "Current time is on or after NotOnOrAfter condition (2012-11-30 17:55:00 UTC >= 2012-11-28 18:33:45 UTC + 1s)"
       end
     end
   end
 
   describe "#validate_document" do
+    @document_data : String?
+    @fingerprint : String?
+
     describe "with valid document" do
       describe "when response has signed message and assertion" do
-        @document_data : String?
-
-        let(document_data) { read_response("response_with_signed_message_and_assertion.xml") }
-        let(:document) { Saml::Response.new(document_data).document }
+        let(:document_data) { read_response("response_with_signed_message_and_assertion.xml") }
         let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
 
         it "is valid" do
-          assert document.validate_document(fingerprint, true), "Document should be valid"
+          assert Saml::Response.new(document_data).document.validate_document(fingerprint, true), "Document should be valid"
         end
       end
 
       describe "when response has signed assertion" do
-        @document_data : String?
-
         let(:document_data) { read_response("response_with_signed_assertion_3.xml") }
-        let(:document) { Saml::Response.new(document_data).document }
         let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
 
         it "is valid" do
-          assert document.validate_document(fingerprint, true), "Document should be valid"
+          assert Saml::Response.new(document_data).document.validate_document(fingerprint, true), "Document should be valid"
         end
       end
     end
 
     describe "signature_wrapping_attack" do
-      @document_data : String?
-
       let(:document_data) { read_invalid_response("signature_wrapping_attack.xml.base64") }
-      let(:document) { Saml::Response.new(document_data).document }
       let(:fingerprint) { "afe71c28ef740bc87425be13a2263d37971da1f9" }
 
       it "is invalid" do
-        assert !document.validate_document(fingerprint, true), "Document should be invalid"
+        assert !Saml::Response.new(document_data).document.validate_document(fingerprint, true), "Document should be invalid"
       end
     end
 
     describe "signature wrapping attack - doubled SAML response body" do
-      @document_data : String?
-
       let(:document_data) { read_invalid_response("response_with_doubled_signed_assertion.xml") }
-      let(:document) { Saml::Response.new(document_data) }
       let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
 
-      it "is valid, but the unsigned information is ignored in favour of the signed information" do
-        assert document.document.validate_document(fingerprint, true), "Document should be valid"
-        assert_equal "someone@example.org", document.name_id, "Document should expose only signed, valid details"
+      # Stricter than ruby-saml: the signature sits in an Assertion it does not reference, so it is rejected.
+      it "is invalid, and the unsigned information is not exposed" do
+        response = Saml::Response.new(document_data)
+        refute response.document.validate_document(fingerprint, true), "Document should be invalid"
+        assert_includes response.document.errors, "Found an invalid Signed Element"
+        assert_nil response.name_id, "Document should expose only signed, valid details"
       end
     end
 
     describe "signature wrapping attack - concealed SAML response body" do
-      @document_data : String?
-
       let(:document_data) { read_invalid_response("response_with_concealed_signed_assertion.xml") }
-      let(:document) { Saml::Response.new(document_data) }
       let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
 
-      it "is valid, but fails to retrieve information" do
-        assert document.document.validate_document(fingerprint, true), "Document should be valid"
-        assert document.name_id.nil?, "Document should expose only signed, valid details"
+      # Stricter than ruby-saml: a signature that is not a direct child of the element it references is rejected.
+      it "is invalid, and fails to retrieve information" do
+        response = Saml::Response.new(document_data)
+        refute response.document.validate_document(fingerprint, true), "Document should be invalid"
+        assert_includes response.document.errors, "Found an invalid Signed Element"
+        assert_nil response.name_id, "Document should expose only signed, valid details"
       end
     end
   end
 
   describe "#validate_document_with_cert" do
     @document_data : String?
+    @document : XMLSecurity::SignedDocument?
+    @idp_cert : OpenSSL::X509::Certificate?
 
     let(:document_data) { read_response("response_with_signed_message_and_assertion.xml") }
     let(:document) { Saml::Response.new(document_data).document }
     let(:idp_cert) { OpenSSL::X509::Certificate.new(crystal_saml_cert_text) }
-    let(:fingerprint) { "4b68c453c7d994aad9025c99d5efcf566287fe8d" }
 
-    describe "with invalid document " do
+    describe "with invalid document" do
       describe "when certificate is invalid" do
-        let(:document) { Saml::Response.new(document_data).document }
-
         it "is invalid" do
-          wrong_document_data = document_data.sub(/<ds:X509Certificate>.*<\/ds:X509Certificate>/, "<ds:X509Certificate>invalid<\/ds:X509Certificate>")
+          wrong_document_data = document_data.sub(/<ds:X509Certificate>.*<\/ds:X509Certificate>/, "<ds:X509Certificate>invalid</ds:X509Certificate>")
           wrong_document = Saml::Response.new(wrong_document_data).document
           refute wrong_document.validate_document_with_cert(idp_cert), "Document should be invalid"
         end
@@ -440,7 +407,6 @@ describe "XmlSecurity::SignedDocument" do
 
       describe "when response has no cert but you have local cert" do
         let(:document) { Saml::Response.new(response_document_valid_signed_without_x509certificate).document }
-        let(:idp_cert) { OpenSSL::X509::Certificate.new(crystal_saml_cert_text) }
 
         it "is valid" do
           assert document.validate_document_with_cert(idp_cert), "Document should be valid"
@@ -449,7 +415,6 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "when response has no cert but you have local cert" do
-      @document_data : String?
       let(:document_data) { response_document_valid_signed_without_x509certificate }
 
       it "is valid" do
@@ -458,15 +423,14 @@ describe "XmlSecurity::SignedDocument" do
     end
 
     describe "when response cert is invalid" do
-      @document_data : String?
       let(:document_data) do
         contents = read_response("response_with_signed_message_and_assertion.xml")
         contents.sub(/<ds:X509Certificate>.*<\/ds:X509Certificate>/,
-                      "<ds:X509Certificate>an-invalid-certificate</ds:X509Certificate>")
+          "<ds:X509Certificate>an-invalid-certificate</ds:X509Certificate>")
       end
 
       it "is not valid" do
-        assert !document.validate_document_with_cert(idp_cert), "Document should be valid"
+        assert !document.validate_document_with_cert(idp_cert), "Document should be invalid"
         assert_equal(["Document Certificate Error"], document.errors)
       end
     end

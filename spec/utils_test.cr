@@ -1,45 +1,41 @@
 require "./spec_helper"
 
-class UtilsTest < Minitest::Test
+describe "Utils" do
   describe ".parse_duration" do
-    DURATIONS_FROM_EPOCH = {
-      # Basic formats
-      "P1Y1M1D" => "1971-02-02T00:00:00.000Z",
-      "PT1H1M1S" => "1970-01-01T01:01:01.000Z",
-      "P1W" => "1970-01-08T00:00:00.000Z",
-      "P1Y1M1DT1H1M1S" => "1971-02-02T01:01:01.000Z",
-
-      # Negative duration
-      "-P1Y1M1DT1H1M1S" => "1968-11-29T22:58:59.000Z",
-
-      # Nominal wraparounds
-      "P13M" => "1971-02-01T00:00:00.000Z",
-      "P31D" => "1970-02-01T00:00:00.000Z",
-
-      # Decimal seconds
-      "PT0.5S" => "1970-01-01T00:00:00.500Z",
-      "PT0,5S" => "1970-01-01T00:00:00.500Z",
-    }
-
     def result(duration, reference = 0)
-      Time.at(
-        Saml::Utils.parse_duration(duration, reference)
-      ).utc.iso8601(3)
+      Time.unix_ms((Saml::Utils.parse_duration(duration, reference) * 1000).round.to_i64).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
     end
 
-    DURATIONS_FROM_EPOCH.each do |duration, expected|
-      it "parses #{duration} to return #{expected} from the given timestamp" do
-        assert_equal expected, result(duration)
+    {% for duration, expected in {
+                                   "P1Y1M1D"         => "1971-02-02T00:00:00.000Z",
+                                   "PT1H1M1S"        => "1970-01-01T01:01:01.000Z",
+                                   "P1W"             => "1970-01-08T00:00:00.000Z",
+                                   "P1Y1M1DT1H1M1S"  => "1971-02-02T01:01:01.000Z",
+                                   "-P1Y1M1DT1H1M1S" => "1968-11-29T22:58:59.000Z",
+                                   "P13M"            => "1971-02-01T00:00:00.000Z",
+                                   "P31D"            => "1970-02-01T00:00:00.000Z",
+                                   "PT0.5S"          => "1970-01-01T00:00:00.500Z",
+                                   "PT0,5S"          => "1970-01-01T00:00:00.500Z",
+                                 } %}
+      it "parses {{ duration.gsub(/-/, "minus ").gsub(/,/, " comma ").gsub(/\./, " dot ").id }} from the given timestamp" do
+        assert_equal({{ expected }}, result({{ duration }}))
       end
-    end
+    {% end %}
 
     it "returns the last calendar day of the next month when advancing from a longer month to a shorter one" do
-      initial_timestamp = Time.iso8601("1970-01-31T00:00:00.000Z").to_i
+      initial_timestamp = Time.parse_rfc3339("1970-01-31T00:00:00.000Z").to_unix
       assert_equal "1970-02-28T00:00:00.000Z", result("P1M", initial_timestamp)
+    end
+
+    it "raises on an invalid duration" do
+      assert_raises(ArgumentError) { Saml::Utils.parse_duration("1Y", 0) }
     end
   end
 
   describe ".format_cert" do
+    @formatted_certificate : String?
+    @formatted_chained_certificate : String?
+
     let(:formatted_certificate) { read_certificate("formatted_certificate") }
     let(:formatted_chained_certificate) { read_certificate("formatted_chained_certificate") }
 
@@ -88,6 +84,8 @@ class UtilsTest < Minitest::Test
   end
 
   describe ".format_private_key" do
+    @formatted_private_key : String?
+
     let(:formatted_private_key) do
       read_certificate("formatted_private_key")
     end
@@ -122,6 +120,8 @@ class UtilsTest < Minitest::Test
     end
 
     describe "an RSA public key" do
+      @formatted_rsa_private_key : String?
+
       let(:formatted_rsa_private_key) do
         read_certificate("formatted_rsa_private_key")
       end
@@ -147,38 +147,86 @@ class UtilsTest < Minitest::Test
     end
   end
 
-  describe "build_query" do
+  describe ".build_cert_object" do
+    it "returns a certificate object for valid certificate string" do
+      assert_instance_of OpenSSL::X509::Certificate, Saml::Utils.build_cert_object(crystal_saml_cert_text)
+    end
+
+    it "returns nil for nil certificate string" do
+      assert_nil Saml::Utils.build_cert_object(nil)
+    end
+
+    it "returns nil for empty certificate string" do
+      assert_nil Saml::Utils.build_cert_object("")
+    end
+
+    it "raises error when given an invalid certificate string" do
+      assert_raises(OpenSSL::Error) do
+        Saml::Utils.build_cert_object("Foobar")
+      end
+    end
+  end
+
+  describe ".build_private_key_object" do
+    it "returns a private key object for valid private key string" do
+      assert_instance_of OpenSSL::PKey::RSA, Saml::Utils.build_private_key_object(crystal_saml_key_text)
+    end
+
+    it "returns nil for nil private key string" do
+      assert_nil Saml::Utils.build_private_key_object(nil)
+    end
+
+    it "returns nil for empty private key string" do
+      assert_nil Saml::Utils.build_private_key_object("")
+    end
+
+    it "raises error when given an invalid private key string" do
+      assert_raises(OpenSSL::Error) do
+        Saml::Utils.build_private_key_object("Foobar")
+      end
+    end
+  end
+
+  describe ".build_query" do
     it "returns the query string" do
-      params = {}
-      params[:type] = "SAMLRequest"
-      params[:data] = "PHNhbWxwOkF1dGhuUmVxdWVzdCBEZXN0aW5hdGlvbj0naHR0cDovL2V4YW1wbGUuY29tP2ZpZWxkPXZhbHVlJyBJRD0nXzk4NmUxZDEwLWVhY2ItMDEzMi01MGRkLTAwOTBmNWRlZGQ3NycgSXNzdWVJbnN0YW50PScyMDE1LTA2LTAxVDIwOjM0OjU5WicgVmVyc2lvbj0nMi4wJyB4bWxuczpzYW1sPSd1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6YXNzZXJ0aW9uJyB4bWxuczpzYW1scD0ndXJuOm9hc2lzOm5hbWVzOnRjOlNBTUw6Mi4wOnByb3RvY29sJy8+"
-      params[:relay_state] = "http://example.com"
-      params[:sig_alg] = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+      params = {
+        type:        "SAMLRequest",
+        data:        "PHNhbWxwOkF1dGhuUmVxdWVzdCBEZXN0aW5hdGlvbj0naHR0cDovL2V4YW1wbGUuY29tP2ZpZWxkPXZhbHVlJyBJRD0nXzk4NmUxZDEwLWVhY2ItMDEzMi01MGRkLTAwOTBmNWRlZGQ3NycgSXNzdWVJbnN0YW50PScyMDE1LTA2LTAxVDIwOjM0OjU5WicgVmVyc2lvbj0nMi4wJyB4bWxuczpzYW1sPSd1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6YXNzZXJ0aW9uJyB4bWxuczpzYW1scD0ndXJuOm9hc2lzOm5hbWVzOnRjOlNBTUw6Mi4wOnByb3RvY29sJy8+",
+        relay_state: "http://example.com",
+        sig_alg:     "http://www.w3.org/2000/09/xmldsig#rsa-sha1",
+      }
       query_string = Saml::Utils.build_query(params)
       assert_equal "SAMLRequest=PHNhbWxwOkF1dGhuUmVxdWVzdCBEZXN0aW5hdGlvbj0naHR0cDovL2V4YW1wbGUuY29tP2ZpZWxkPXZhbHVlJyBJRD0nXzk4NmUxZDEwLWVhY2ItMDEzMi01MGRkLTAwOTBmNWRlZGQ3NycgSXNzdWVJbnN0YW50PScyMDE1LTA2LTAxVDIwOjM0OjU5WicgVmVyc2lvbj0nMi4wJyB4bWxuczpzYW1sPSd1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6YXNzZXJ0aW9uJyB4bWxuczpzYW1scD0ndXJuOm9hc2lzOm5hbWVzOnRjOlNBTUw6Mi4wOnByb3RvY29sJy8%2B&RelayState=http%3A%2F%2Fexample.com&SigAlg=http%3A%2F%2Fwww.w3.org%2F2000%2F09%2Fxmldsig%23rsa-sha1", query_string
     end
   end
 
-  describe "#verify_signature" do
-    before do
-      @params = {}
-      @params[:cert] = crystal_saml_cert
-      @params[:sig_alg] = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
-      @params[:query_string] = "SAMLRequest=PHNhbWxwOkF1dGhuUmVxdWVzdCBEZXN0aW5hdGlvbj0naHR0cDovL2V4YW1wbGUuY29tP2ZpZWxkPXZhbHVlJyBJRD0nXzk4NmUxZDEwLWVhY2ItMDEzMi01MGRkLTAwOTBmNWRlZGQ3NycgSXNzdWVJbnN0YW50PScyMDE1LTA2LTAxVDIwOjM0OjU5WicgVmVyc2lvbj0nMi4wJyB4bWxuczpzYW1sPSd1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6YXNzZXJ0aW9uJyB4bWxuczpzYW1scD0ndXJuOm9hc2lzOm5hbWVzOnRjOlNBTUw6Mi4wOnByb3RvY29sJy8%2B&RelayState=http%3A%2F%2Fexample.com&SigAlg=http%3A%2F%2Fwww.w3.org%2F2000%2F09%2Fxmldsig%23rsa-sha1"
+  describe ".verify_signature" do
+    VALID_REDIRECT_SIGNATURE = "uWJm/T4gKLYEsVu1j/ZmjDeHp9zYPXPXWTXHFJZf2KKnWg57fUw3x2l6KTyRQ+Xjigb+sfYdGnnwmIz6KngXYRnh7nO6inspRLWOwkqQFy9iR9LDlMcfpXV/0g3oAxBxO6tX8MUHqR2R62SYZRGd1rxC9apg4vQiP97+atOI8t4="
+
+    def signature_params(signature)
+      {
+        cert:         crystal_saml_cert,
+        sig_alg:      "http://www.w3.org/2000/09/xmldsig#rsa-sha1",
+        signature:    signature,
+        query_string: "SAMLRequest=PHNhbWxwOkF1dGhuUmVxdWVzdCBEZXN0aW5hdGlvbj0naHR0cDovL2V4YW1wbGUuY29tP2ZpZWxkPXZhbHVlJyBJRD0nXzk4NmUxZDEwLWVhY2ItMDEzMi01MGRkLTAwOTBmNWRlZGQ3NycgSXNzdWVJbnN0YW50PScyMDE1LTA2LTAxVDIwOjM0OjU5WicgVmVyc2lvbj0nMi4wJyB4bWxuczpzYW1sPSd1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6YXNzZXJ0aW9uJyB4bWxuczpzYW1scD0ndXJuOm9hc2lzOm5hbWVzOnRjOlNBTUw6Mi4wOnByb3RvY29sJy8%2B&RelayState=http%3A%2F%2Fexample.com&SigAlg=http%3A%2F%2Fwww.w3.org%2F2000%2F09%2Fxmldsig%23rsa-sha1",
+      }
     end
 
     it "returns true when the signature is valid" do
-      @params[:signature] = "uWJm/T4gKLYEsVu1j/ZmjDeHp9zYPXPXWTXHFJZf2KKnWg57fUw3x2l6KTyRQ+Xjigb+sfYdGnnwmIz6KngXYRnh7nO6inspRLWOwkqQFy9iR9LDlMcfpXV/0g3oAxBxO6tX8MUHqR2R62SYZRGd1rxC9apg4vQiP97+atOI8t4="
-      assert Saml::Utils.verify_signature(@params)
+      assert Saml::Utils.verify_signature(signature_params(VALID_REDIRECT_SIGNATURE))
     end
 
     it "returns false when the signature is invalid" do
-      @params[:signature] = "uWJm/InVaLiDsVu1j/ZmjDeHp9zYPXPXWTXHFJZf2KKnWg57fUw3x2l6KTyRQ+Xjigb+sfYdGnnwmIz6KngXYRnh7nO6inspRLWOwkqQFy9iR9LDlMcfpXV/0g3oAxBxO6tX8MUHqR2R62SYZRGd1rxC9apg4vQiP97+atOI8t4="
-      assert !Saml::Utils.verify_signature(@params)
+      refute Saml::Utils.verify_signature(signature_params("uWJm/InVaLiDsVu1j/ZmjDeHp9zYPXPXWTXHFJZf2KKnWg57fUw3x2l6KTyRQ+Xjigb+sfYdGnnwmIz6KngXYRnh7nO6inspRLWOwkqQFy9iR9LDlMcfpXV/0g3oAxBxO6tX8MUHqR2R62SYZRGd1rxC9apg4vQiP97+atOI8t4="))
+    end
+
+    it "returns false for an unsupported signature algorithm" do
+      params = signature_params(VALID_REDIRECT_SIGNATURE).merge(sig_alg: "http://www.w3.org/2000/09/xmldsig#hmac-sha1")
+      refute Saml::Utils.verify_signature(params)
     end
   end
 
-  describe "#status_error_msg" do
+  describe ".status_error_msg" do
     it "returns a error msg with status_code and status message" do
       error_msg = "The status code of the Logout Response was not Success"
       status_code = "urn:oasis:names:tc:SAML:2.0:status:Requester"
@@ -201,101 +249,97 @@ class UtilsTest < Minitest::Test
     end
   end
 
-  describe "Utils" do
-    describe ".uuid" do
-      it "returns a uuid starting with an underscore" do
-        assert_match(/^_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, Saml::Utils.uuid)
-      end
-
-      it "doesn't return the same value twice" do
-        refute_equal Saml::Utils.uuid, Saml::Utils.uuid
-      end
+  describe ".uuid" do
+    it "returns a uuid starting with an underscore" do
+      assert_match(/^_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, Saml::Utils.uuid)
     end
 
-    describe "uri_match" do
-      it "matches two urls" do
-        destination = "http://www.example.com/test?var=stuff"
-        settings = "http://www.example.com/test?var=stuff"
-        assert Saml::Utils.uri_match?(destination, settings)
-      end
+    it "doesn't return the same value twice" do
+      refute_equal Saml::Utils.uuid, Saml::Utils.uuid
+    end
+  end
 
-      it "fails to match two urls" do
-        destination = "http://www.example.com/test?var=stuff"
-        settings = "http://www.example.com/othertest?var=stuff"
-        assert !Saml::Utils.uri_match?(destination, settings)
-      end
-
-      it "matches two URLs if the scheme case doesn't match" do
-        destination = "http://www.example.com/test?var=stuff"
-        settings = "HTTP://www.example.com/test?var=stuff"
-        assert Saml::Utils.uri_match?(destination, settings)
-      end
-
-      it "matches two URLs if the host case doesn't match" do
-        destination = "http://www.EXAMPLE.com/test?var=stuff"
-        settings = "http://www.example.com/test?var=stuff"
-        assert Saml::Utils.uri_match?(destination, settings)
-      end
-
-      it "fails to match two URLs if the path case doesn't match" do
-        destination = "http://www.example.com/TEST?var=stuff"
-        settings = "http://www.example.com/test?var=stuff"
-        assert !Saml::Utils.uri_match?(destination, settings)
-      end
-
-      it "fails to match two URLs if the query case doesn't match" do
-        destination = "http://www.example.com/test?var=stuff"
-        settings = "http://www.example.com/test?var=STUFF"
-        assert !Saml::Utils.uri_match?(destination, settings)
-      end
-
-      it "matches two non urls" do
-        destination = "stuff"
-        settings = "stuff"
-        assert Saml::Utils.uri_match?(destination, settings)
-      end
-
-      it "fails to match two non urls" do
-        destination = "stuff"
-        settings = "not stuff"
-        assert !Saml::Utils.uri_match?(destination, settings)
-      end
+  describe ".uri_match?" do
+    it "matches two urls" do
+      destination = "http://www.example.com/test?var=stuff"
+      settings = "http://www.example.com/test?var=stuff"
+      assert Saml::Utils.uri_match?(destination, settings)
     end
 
-    describe "element_text" do
-      it "returns the element text" do
-        element = REXML::Document.new("<element>element text</element>").elements.first
-        assert_equal "element text", Saml::Utils.element_text(element)
-      end
+    it "fails to match two urls" do
+      destination = "http://www.example.com/test?var=stuff"
+      settings = "http://www.example.com/othertest?var=stuff"
+      assert !Saml::Utils.uri_match?(destination, settings)
+    end
 
-      it "returns all segments of the element text" do
-        element = REXML::Document.new("<element>element <!-- comment -->text</element>").elements.first
-        assert_equal "element text", Saml::Utils.element_text(element)
-      end
+    it "matches two URLs if the scheme case doesn't match" do
+      destination = "http://www.example.com/test?var=stuff"
+      settings = "HTTP://www.example.com/test?var=stuff"
+      assert Saml::Utils.uri_match?(destination, settings)
+    end
 
-      it "returns normalized element text" do
-        element = REXML::Document.new("<element>element &amp; text</element>").elements.first
-        assert_equal "element & text", Saml::Utils.element_text(element)
-      end
+    it "matches two URLs if the host case doesn't match" do
+      destination = "http://www.EXAMPLE.com/test?var=stuff"
+      settings = "http://www.example.com/test?var=stuff"
+      assert Saml::Utils.uri_match?(destination, settings)
+    end
 
-      it "returns the CDATA element text" do
-        element = REXML::Document.new("<element><![CDATA[element & text]]></element>").elements.first
-        assert_equal "element & text", Saml::Utils.element_text(element)
-      end
+    it "fails to match two URLs if the path case doesn't match" do
+      destination = "http://www.example.com/TEST?var=stuff"
+      settings = "http://www.example.com/test?var=stuff"
+      assert !Saml::Utils.uri_match?(destination, settings)
+    end
 
-      it "returns the element text with newlines and additional whitespace" do
-        element = REXML::Document.new("<element>  element \n text  </element>").elements.first
-        assert_equal "  element \n text  ", Saml::Utils.element_text(element)
-      end
+    it "fails to match two URLs if the query case doesn't match" do
+      destination = "http://www.example.com/test?var=stuff"
+      settings = "http://www.example.com/test?var=STUFF"
+      assert !Saml::Utils.uri_match?(destination, settings)
+    end
 
-      it "returns nil when element is nil" do
-        assert_nil Saml::Utils.element_text(nil)
-      end
+    it "matches two non urls" do
+      destination = "stuff"
+      settings = "stuff"
+      assert Saml::Utils.uri_match?(destination, settings)
+    end
 
-      it "returns empty string when element has no text" do
-        element = REXML::Document.new("<element></element>").elements.first
-        assert_equal "", Saml::Utils.element_text(element)
-      end
+    it "fails to match two non urls" do
+      destination = "stuff"
+      settings = "not stuff"
+      assert !Saml::Utils.uri_match?(destination, settings)
+    end
+  end
+
+  describe ".element_text" do
+    def element(xml)
+      XML.parse(xml).root
+    end
+
+    it "returns the element text" do
+      assert_equal "element text", Saml::Utils.element_text(element("<element>element text</element>"))
+    end
+
+    it "returns all segments of the element text" do
+      assert_equal "element text", Saml::Utils.element_text(element("<element>element <!-- comment -->text</element>"))
+    end
+
+    it "returns normalized element text" do
+      assert_equal "element & text", Saml::Utils.element_text(element("<element>element &amp; text</element>"))
+    end
+
+    it "returns the CDATA element text" do
+      assert_equal "element & text", Saml::Utils.element_text(element("<element><![CDATA[element & text]]></element>"))
+    end
+
+    it "returns the element text with newlines and additional whitespace" do
+      assert_equal "  element \n text  ", Saml::Utils.element_text(element("<element>  element \n text  </element>"))
+    end
+
+    it "returns nil when element is nil" do
+      assert_nil Saml::Utils.element_text(nil)
+    end
+
+    it "returns empty string when element has no text" do
+      assert_equal "", Saml::Utils.element_text(element("<element></element>"))
     end
   end
 end

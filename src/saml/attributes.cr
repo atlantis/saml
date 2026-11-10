@@ -1,117 +1,74 @@
 module Saml
-
   # SAML2 Attributes. Parse the Attributes from the AttributeStatement of the SAML Response.
   #
   class Attributes
-    alias AttributeValue = String | Int32 | Bool | Nil
-    include Enumerable(AttributeValue)
+    alias AttributeValue = String?
 
-    getter :attributes
+    include Enumerable({String, Array(AttributeValue)})
 
-    # @param attrs [Hash] The +attrs+ must be a Hash with attribute names as keys and **arrays** as values:
-    #    Attributes.new({
-    #      'name' => ['value1', 'value2'],
-    #      'mail' => ['value1'],
-    #    })
-    #
-    def initialize(attrs = {} of String => Array(AttributeValue))
+    getter attributes : Hash(String, Array(AttributeValue))
+
+    # @param attrs [Hash] attribute names to arrays of values
+    def initialize(attrs : Hash(String, Array(AttributeValue)) = {} of String => Array(AttributeValue))
       @attributes = attrs
     end
 
-    # Iterate over all attributes
-    #
-    def each
-      attributes.each { |name, values| yield name, values }
+    def each(& : {String, Array(AttributeValue)} ->)
+      attributes.each { |name, values| yield({name, values}) }
     end
 
     # Test attribute presence by name
-    # @param name [String] The attribute name to be checked
-    #
-    def includes?(name)
+    def includes?(name) : Bool
       attributes.has_key?(canonize_name(name))
     end
 
     # Return first value for an attribute
-    # @param name [String] The attribute name
-    # @return [String] The value (First occurrence)
-    #
-    def single(name)
-      attributes[canonize_name(name)].first if includes?(name)
+    def single(name) : AttributeValue
+      attributes[canonize_name(name)]?.try(&.first?)
     end
 
     # Return all values for an attribute
-    # @param name [String] The attribute name
-    # @return [Array] Values of the attribute
-    #
-    def multi(name)
-      attributes[canonize_name(name)]
+    def multi(name) : Array(AttributeValue)?
+      attributes[canonize_name(name)]?
     end
 
-    # Retrieve attribute value(s)
-    # @param name [String] The attribute name
-    # @return [String|Array] Depending on the single value compatibility status this returns:
-    #                        - First value if single_value_compatibility = true
-    #                          response.attributes['mail']  # => 'user@example.com'
-    #                        - All values if single_value_compatibility = false
-    #                          response.attributes['mail']  # => ['user@example.com','user@example.net']
-    #
-    def [](name)
-      multi(canonize_name(name))
+    # All values of the attribute, nil when it is missing.
+    def [](name) : Array(AttributeValue)?
+      multi(name)
     end
 
     # @return [Hash] Return all attributes as a hash
-    #
-    def all
+    def all : Hash(String, Array(AttributeValue))
       attributes
     end
 
-    # @param name [String] The attribute name
-    # @param values [Array] The values
-    #
-    def set(name, values)
+    # Name to non-nil values, as plain strings.
+    def to_h : Hash(String, Array(String))
+      attributes.transform_values(&.compact)
+    end
+
+    def set(name, values : Array(AttributeValue))
       attributes[canonize_name(name)] = values
     end
 
-    def []=(name, values)
-      self.set(name, values)
+    def []=(name, values : Array(AttributeValue))
+      set(name, values)
     end
 
-    # @param name [String] The attribute name
-    # @param values [Array] The values
-    #
-    def add(name : String, values = [] of AttributeValue)
-      attributes[canonize_name(name)] ||= [] of AttributeValue
-      attributes[canonize_name(name)] += values
+    def add(name, values : Array(AttributeValue) = [] of AttributeValue)
+      key = canonize_name(name)
+      attributes[key] = (attributes[key]? || [] of AttributeValue) + values
     end
 
-    # Make comparable to another Attributes collection based on attributes
-    # @param other [Attributes] An Attributes object to compare with
-    # @return [Boolean] True if are contains the same attributes and values
-    #
-    def ==(other)
-      if other.is_a?(Attributes)
-        all == other.all
-      else
-        super
-      end
+    def ==(other : Attributes)
+      all == other.all
     end
 
     # Fetch attribute value using name or regex
-    # @param name [String|Regexp] The attribute name
-    # @return [String|Array] Depending on the single value compatibility status this returns:
-    #                        - First value if single_value_compatibility = true
-    #                          response.attributes['mail']  # => 'user@example.com'
-    #                        - All values if single_value_compatibility = false
-    #                          response.attributes['mail']  # => ['user@example.com','user@example.net']
-    #
-    def fetch(name)
+    def fetch(name : String | Symbol | Regex) : Array(AttributeValue)?
       attributes.each_key do |attribute_key|
-        if name.is_a?(Regexp)
-          if name.responds_to? :match?
-            return self[attribute_key] if name.match?(attribute_key)
-          else
-            return self[attribute_key] if name.match(attribute_key)
-          end
+        if name.is_a?(Regex)
+          return self[attribute_key] if name.matches?(attribute_key)
         elsif canonize_name(name) == canonize_name(attribute_key)
           return self[attribute_key]
         end
@@ -119,17 +76,7 @@ module Saml
       nil
     end
 
-    def each(&) : AttributeValue
-      attributes.each do |attribute|
-        yield attribute
-      end
-    end
-
-    # stringifies all names so both 'email' and :email return the same result
-    # @param name [String] The attribute name
-    # @return [String] stringified name
-    #
-    protected def canonize_name(name)
+    protected def canonize_name(name) : String
       name.to_s
     end
   end

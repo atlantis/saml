@@ -1,22 +1,24 @@
 # Only supports SAML 2.0
 module Saml
-
   # SAML2 Metadata. XML Metadata Builder
   #
   class Metadata
+    METADATA  = "urn:oasis:names:tc:SAML:2.0:metadata"
+    ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion"
+    DSIG      = "http://www.w3.org/2000/09/xmldsig#"
+    # Kept as REXML wrote it so existing consumers see the same bytes.
+    XML_DECLARATION = "<?xml version='1.0' encoding='UTF-8'?>"
 
     # Return SP metadata based on the settings.
-    # @param settings [Saml::Settings|nil] Toolkit settings
+    # @param settings [Saml::Settings] Toolkit settings
     # @param pretty_print [Boolean] Pretty print or not the response
     #                               (No pretty print if you gonna validate the signature)
-    # @param valid_until [DateTime] Metadata's valid time
+    # @param valid_until [Time] Metadata's valid time
     # @param cache_duration [Integer] Duration of the cache in seconds
     # @return [String] XML Metadata of the Service Provider
-    #
-    def generate(settings, pretty_print = false, valid_until = nil, cache_duration = nil)
-      meta_doc = XMLSecurity::Document.new
-      add_xml_declaration(meta_doc)
-      root = add_root_element(meta_doc, settings, valid_until, cache_duration)
+    def generate(settings : Settings, pretty_print = false, valid_until : Time? = nil, cache_duration : Int? = nil) : String
+      meta_doc = create_document(settings, valid_until, cache_duration)
+      root = meta_doc.root.not_nil!
       sp_sso = add_sp_sso_element(root, settings)
       add_sp_certificates(sp_sso, settings)
       add_sp_service_elements(sp_sso, settings)
@@ -25,114 +27,90 @@ module Saml
       output_xml(meta_doc, pretty_print)
     end
 
-    protected def add_xml_declaration(meta_doc)
-      meta_doc << REXML::XMLDecl.new("1.0", "UTF-8")
-    end
+    protected def create_document(settings, valid_until, cache_duration) : XMLSecurity::Document
+      namespaces = {"xmlns:md" => METADATA}
+      namespaces["xmlns:saml"] = ASSERTION if settings.attribute_consuming_service.configured?
 
-    protected def add_root_element(meta_doc, settings, valid_until, cache_duration)
-      namespaces = {
-        "xmlns:md" => "urn:oasis:names:tc:SAML:2.0:metadata",
-      }
-
-      if settings.attribute_consuming_service.configured?
-        namespaces["xmlns:saml"] = "urn:oasis:names:tc:SAML:2.0:assertion"
+      meta_doc = XMLSecurity::Document.new("md:EntityDescriptor", namespaces)
+      root = meta_doc.root.not_nil!
+      root["ID"] = Saml::Utils.uuid
+      if sp_entity_id = settings.sp_entity_id
+        root["entityID"] = sp_entity_id
       end
-
-      root = meta_doc.add_element("md:EntityDescriptor", namespaces)
-      root.attributes["ID"] = Saml::Utils.uuid
-      root.attributes["entityID"] = settings.sp_entity_id if settings.sp_entity_id
-      root.attributes["validUntil"] = valid_until.utc.to_s("%Y-%m-%dT%H:%M:%SZ") if valid_until
-      root.attributes["cacheDuration"] = "PT" + cache_duration.to_s + "S" if cache_duration
-      root
+      root["validUntil"] = valid_until.to_utc.to_s("%Y-%m-%dT%H:%M:%SZ") if valid_until
+      root["cacheDuration"] = "PT#{cache_duration}S" if cache_duration
+      meta_doc
     end
 
-    protected def add_sp_sso_element(root, settings)
-      root.add_element "md:SPSSODescriptor", {
+    protected def add_sp_sso_element(root, settings) : XML::Node
+      root.add_element("md:SPSSODescriptor", {
         "protocolSupportEnumeration" => "urn:oasis:names:tc:SAML:2.0:protocol",
-        "AuthnRequestsSigned" => settings.security[:authn_requests_signed]?,
-        "WantAssertionsSigned" => settings.security[:want_assertions_signed]?,
-      }
+        "AuthnRequestsSigned"        => (settings.security[:authn_requests_signed]? == true).to_s,
+        "WantAssertionsSigned"       => (settings.security[:want_assertions_signed]? == true).to_s,
+      })
     end
 
     # Add KeyDescriptor if messages will be signed / encrypted
     # with SP certificate, and new SP certificate if any
     protected def add_sp_certificates(sp_sso, settings)
-      cert = settings.get_sp_cert
-      cert_new = settings.get_sp_cert_new
-
-      [cert, cert_new].each do |sp_cert|
-        if sp_cert
-          cert_text = Base64.encode(sp_cert.to_der).gsub("\n", "")
-          kd = sp_sso.add_element "md:KeyDescriptor", { "use" => "signing" }
-          ki = kd.add_element "ds:KeyInfo", { "xmlns:ds" => "http://www.w3.org/2000/09/xmldsig#" }
-          xd = ki.add_element "ds:X509Data"
-          xc = xd.add_element "ds:X509Certificate"
-          xc.text = cert_text
-
-          if settings.security[:want_assertions_encrypted]
-            kd2 = sp_sso.add_element "md:KeyDescriptor", { "use" => "encryption" }
-            ki2 = kd2.add_element "ds:KeyInfo", { "xmlns:ds" => "http://www.w3.org/2000/09/xmldsig#" }
-            xd2 = ki2.add_element "ds:X509Data"
-            xc2 = xd2.add_element "ds:X509Certificate"
-            xc2.text = cert_text
-          end
-        end
+      [settings.get_sp_cert, settings.get_sp_cert_new].each do |sp_cert|
+        next unless sp_cert
+        cert_text = Base64.strict_encode(sp_cert.to_der)
+        add_key_descriptor(sp_sso, "signing", cert_text)
+        add_key_descriptor(sp_sso, "encryption", cert_text) if settings.security[:want_assertions_encrypted]? == true
       end
 
       sp_sso
     end
 
+    private def add_key_descriptor(sp_sso, use, cert_text)
+      kd = sp_sso.add_element("md:KeyDescriptor", {"use" => use})
+      ki = kd.add_element("ds:KeyInfo", {"xmlns:ds" => DSIG})
+      ki.add_element("ds:X509Data").add_element("ds:X509Certificate").text = cert_text
+    end
+
     protected def add_sp_service_elements(sp_sso, settings)
-      if settings.single_logout_service_url
-        sp_sso.add_element "md:SingleLogoutService", {
-          "Binding" => settings.single_logout_service_binding,
-          "Location" => settings.single_logout_service_url,
-          "ResponseLocation" => settings.single_logout_service_url,
-        }
+      if slo_url = settings.single_logout_service_url
+        sp_sso.add_element("md:SingleLogoutService", {
+          "Binding"          => settings.single_logout_service_binding,
+          "Location"         => slo_url,
+          "ResponseLocation" => slo_url,
+        })
       end
 
-      if settings.name_identifier_format
-        nameid = sp_sso.add_element "md:NameIDFormat"
-        nameid.text = settings.name_identifier_format
+      if format = settings.name_identifier_format
+        sp_sso.add_element("md:NameIDFormat").text = format
       end
 
-      if settings.assertion_consumer_service_url
-        sp_sso.add_element "md:AssertionConsumerService", {
-          "Binding" => settings.assertion_consumer_service_binding,
-          "Location" => settings.assertion_consumer_service_url,
-          "isDefault" => true,
-          "index" => 0,
-        }
-      end
-
-      if settings.attribute_consuming_service.configured?
-        sp_acs = sp_sso.add_element "md:AttributeConsumingService", {
+      if acs_url = settings.assertion_consumer_service_url
+        sp_sso.add_element("md:AssertionConsumerService", {
+          "Binding"   => settings.assertion_consumer_service_binding,
+          "Location"  => acs_url,
           "isDefault" => "true",
-          "index" => settings.attribute_consuming_service.index,
-        }
-        srv_name = sp_acs.add_element "md:ServiceName", {
-          "xml:lang" => "en",
-        }
-        srv_name.text = settings.attribute_consuming_service.name
-        settings.attribute_consuming_service.attributes.each do |attribute|
-          sp_req_attr = sp_acs.add_element "md:RequestedAttribute", {
-            "NameFormat" => attribute[:name_format],
-            "Name" => attribute[:name],
-            "FriendlyName" => attribute[:friendly_name],
-            "isRequired" => attribute[:is_required] || false,
-          }
-          unless attribute[:attribute_value].nil?
-            [attribute[:attribute_value]].flatten.each do |value|
-              sp_attr_val = sp_req_attr.add_element "saml:AttributeValue"
-              sp_attr_val.text = value.to_s
-            end
+          "index"     => "0",
+        })
+      end
+
+      service = settings.attribute_consuming_service
+      if service.configured?
+        sp_acs = sp_sso.add_element("md:AttributeConsumingService", {"isDefault" => "true", "index" => service.index})
+        sp_acs.add_element("md:ServiceName", {"xml:lang" => "en"}).text = service.name.to_s
+        service.attributes.each do |attribute|
+          sp_req_attr = sp_acs.add_element("md:RequestedAttribute", {
+            "NameFormat"   => attribute[:name_format]?.try(&.to_s),
+            "Name"         => attribute[:name]?.try(&.to_s),
+            "FriendlyName" => attribute[:friendly_name]?.try(&.to_s),
+            "isRequired"   => (attribute[:is_required]? || false).to_s,
+          })
+          case values = attribute[:attribute_value]?
+          when Nil
+          when Array
+            values.each { |value| sp_req_attr.add_element("saml:AttributeValue").text = value.to_s }
+          else
+            sp_req_attr.add_element("saml:AttributeValue").text = values.to_s
           end
         end
       end
-
-      # With OpenSSO, it might be required to also include
-      #  <md:RoleDescriptor xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:query="urn:oasis:names:tc:SAML:metadata:ext:query" xsi:type="query:AttributeQueryDescriptorType" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"/>
-      #  <md:XACMLAuthzDecisionQueryDescriptor WantAssertionsSigned="false" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"/>
 
       sp_sso
     end
@@ -143,26 +121,23 @@ module Saml
     end
 
     protected def embed_signature(meta_doc, settings)
-      return unless settings.security[:metadata_signed]
+      return unless settings.security[:metadata_signed]? == true
 
       private_key = settings.get_sp_key
       cert = settings.get_sp_cert
       return unless private_key && cert
 
-      meta_doc.sign_document(private_key, cert, settings.security[:signature_method], settings.security[:digest_method])
+      meta_doc.sign_document(private_key, cert, settings.security[:signature_method]?.try(&.to_s), settings.security[:digest_method]?.try(&.to_s))
     end
 
-    protected def output_xml(meta_doc, pretty_print)
-      ret = ""
-
-      # pretty print the XML so IdP administrators can easily see what the SP supports
+    protected def output_xml(meta_doc, pretty_print) : String
+      root = meta_doc.root.not_nil!
       if pretty_print
-        meta_doc.write(ret, 1)
+        # So IdP administrators can easily see what the SP supports
+        XML_DECLARATION + "\n" + root.to_xml(indent: 1, options: XML::SaveOptions::FORMAT | XML::SaveOptions::NO_DECL | XML::SaveOptions::AS_XML)
       else
-        ret = meta_doc.to_s
+        XML_DECLARATION + root.to_xml(options: XML::SaveOptions::NO_DECL | XML::SaveOptions::AS_XML)
       end
-
-      ret
     end
   end
 end

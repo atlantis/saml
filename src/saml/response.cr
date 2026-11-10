@@ -1,49 +1,20 @@
 # Only supports SAML 2.0
 module Saml
-
   # SAML2 Authentication Response. SAML Response
   #
+  # Everything read from the assertion (NameID, attributes, conditions, ...)
+  # comes from the canonical bytes a signature's digest covers, re-parsed on
+  # their own, never from a lookup in the received document.
   class Response < SamlMessage
-    alias OptionValue = String | Bool | Float32 | Float64 | Int32 | Int64 | Time::Span | Settings | Symbol
+    alias OptionValue = String | Bool | Float32 | Float64 | Int32 | Int64 | Time::Span | Settings | Symbol | Nil
     include ErrorHandling
 
-    ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion"
-    PROTOCOL = "urn:oasis:names:tc:SAML:2.0:protocol"
-    DSIG = "http://www.w3.org/2000/09/xmldsig#"
-    XENC = "http://www.w3.org/2001/04/xmlenc#"
-
-    # TODO: Settings should probably be initialized too... WDYT?
-
-    # Saml::Settings Toolkit settings
-    property settings : Saml::Settings
-
-    getter document : XMLSecurity::SignedDocument
-    getter decrypted_document : XMLSecurity::SignedDocument? = nil
-    getter :response
-    property options : Hash(Symbol, OptionValue)
-
-    property :soft
-
-    @name_id : String?
-    @name_id_format : String?
-    @name_id_node : XML::Node?
-    @name_id_spnamequalifier : String?
-    @name_id_namequalifier : String?
-    @sessionindex : String?
-    @expires_at : Time?
-    @status_code : String?
-    @status_message : String?
-    @in_response_to : String?
-    @destination : String?
-    @assertion_id : String?
-    @soft : Bool = true
-    @response : String
-    @attr_statements : Saml::Attributes?
-    @conditions : XML::Node?
-    @not_before : Time?
-    @not_on_or_after : Time?
-    @audiences : Array(String)? = nil
-    @issuers : Array(String)? = nil
+    ASSERTION       = "urn:oasis:names:tc:SAML:2.0:assertion"
+    PROTOCOL        = "urn:oasis:names:tc:SAML:2.0:protocol"
+    DSIG            = "http://www.w3.org/2000/09/xmldsig#"
+    XENC            = "http://www.w3.org/2001/04/xmlenc#"
+    XSI             = "http://www.w3.org/2001/XMLSchema-instance"
+    SAML_NAMESPACES = {"p" => PROTOCOL, "a" => ASSERTION, "samlp" => PROTOCOL, "saml" => ASSERTION, "ds" => DSIG}
 
     # Response available options
     # This is not a whitelist to allow people extending Saml:Response
@@ -52,33 +23,57 @@ module Saml
       :allowed_clock_drift, :check_duplicated_attributes, :matches_request_id, :settings, :skip_audience, :skip_authnstatement, :skip_conditions,
       :skip_destination, :skip_recipient_check, :skip_subject_confirmation,
     ]
-    # TODO: Update the comment on initialize to describe every option
 
-    # Constructs the SAML Response. A Response Object that is an extension of the SamlMessage class.
-    # @param response [String] A UUEncoded SAML response from the IdP.
-    # @param options  [Hash]   :settings to provide the Saml::Settings object
-    #                          Or some options for the response validation process like skip the conditions validation
-    #                          with the :skip_conditions, or allow a clock_drift when checking dates with :allowed_clock_drift
-    #                          or :matches_request_id that will validate that the response matches the ID of the request,
-    #                          or skip the subject confirmation validation with the :skip_subject_confirmation option
-    #                          or skip the recipient validation of the subject confirmation element with :skip_recipient_check option
-    #                          or skip the audience validation with :skip_audience option
-    #
-    def initialize(response : String?, options = {} of Symbol => OptionValue)
-      @options = options.merge({} of Symbol => OptionValue)
-      @settings = @options[:settings]?.as?(Saml::Settings) || Saml::Settings.new
-      @options.delete(:settings)
+    property settings : Saml::Settings
+    getter document : XMLSecurity::SignedDocument
+    getter decrypted_document : XMLSecurity::SignedDocument? = nil
+    getter response : String
+    property options : Hash(Symbol, OptionValue)
+    property soft : Bool = true
+
+    @name_id : String?
+    @name_id_format : String?
+    @name_id_node : XML::Node?
+    @name_id_resolved = false
+    @sessionindex : String?
+    @expires_at : Time?
+    @authn_instant : String?
+    @authn_context_class_ref : String?
+    @status_code : String?
+    @status_message : String?
+    @in_response_to : String?
+    @destination : String?
+    @assertion_id : String?
+    @attr_statements : Saml::Attributes?
+    @conditions : XML::Node?
+    @not_before : Time?
+    @not_on_or_after : Time?
+    @audiences : Array(String)?
+    @issuers : Array(String)?
+    @signed_assertion : XML::Node?
+    @signed_assertion_resolved = false
+    # Parsed documents whose nodes are handed out; kept so they outlive them.
+    @owned_documents = [] of XML::Node
+
+    # Constructs the SAML Response.
+    # @param response [String] A base64 encoded SAML response from the IdP (or the XML itself).
+    # @param options  [Hash] :settings to provide the Saml::Settings object, and the
+    #   validation options in AVAILABLE_OPTIONS (:allowed_clock_drift in seconds or a
+    #   Time::Span, :matches_request_id, :skip_* ...).
+    # @raise [ArgumentError] if response is nil
+    # @raise [ValidationError] if the message is too large, or an encrypted
+    #   assertion can't be decrypted
+    def initialize(response : String?, options : Hash = {} of Symbol => OptionValue)
+      raise ArgumentError.new("Response cannot be nil") if response.nil?
+
+      @options = {} of Symbol => OptionValue
+      options.each do |key, value|
+        @options[key] = value
+      end
+      @settings = @options.delete(:settings).as?(Saml::Settings) || Saml::Settings.new
+      @soft = @settings.soft
 
       @error_messages = [] of String
-
-      @soft = true
-      if settings = @settings
-        unless settings.soft.nil?
-          @soft = settings.soft
-        end
-      end
-
-      response = response && !response.empty? ? response : "<blank></blank>"
       @response = decode_raw_saml(response, @settings)
       @document = XMLSecurity::SignedDocument.new(@response, @error_messages)
 
@@ -94,124 +89,76 @@ module Saml
     # Validates the SAML Response with the default values (soft = true)
     # @param collect_errors [Boolean] Stop validation when first error appears or keep validating. (if soft=true)
     # @return [Boolean] TRUE if the SAML Response is valid
-    #
-    def is_valid?(collect_errors = false)
+    def is_valid?(collect_errors = false) : Bool
       validate(collect_errors)
     end
 
     # @return [String] the NameID provided by the SAML response from the IdP.
-    #
-    def name_id
+    def name_id : String?
       @name_id ||= Utils.element_text(name_id_node)
     end
 
-    def nameid
-      self.name_id
+    def nameid : String?
+      name_id
     end
 
     # @return [String] the NameID Format provided by the SAML response from the IdP.
-    #
-    def name_id_format
-      @name_id_format ||=
-        if node = name_id_node
-          node["Format"]
-        end
+    def name_id_format : String?
+      @name_id_format ||= name_id_node.try(&.[]?("Format"))
     end
 
-    def nameid_format
-      self.name_id_format
+    def nameid_format : String?
+      name_id_format
     end
 
     # @return [String] the NameID SPNameQualifier provided by the SAML response from the IdP.
-    #
-    def name_id_spnamequalifier
-      @name_id_spnamequalifier ||=
-        if node = name_id_node
-          node["SPNameQualifier"]?
-        end
+    def name_id_spnamequalifier : String?
+      name_id_node.try(&.[]?("SPNameQualifier"))
     end
 
     # @return [String] the NameID NameQualifier provided by the SAML response from the IdP.
-    #
-    def name_id_namequalifier
-      @name_id_namequalifier ||=
-        if node = name_id_node
-          node["NameQualifier"]
-        end
+    def name_id_namequalifier : String?
+      name_id_node.try(&.[]?("NameQualifier"))
     end
 
     # Gets the SessionIndex from the AuthnStatement.
-    # Could be used to be stored in the local session in order
-    # to be used in a future Logout Request that the SP could
-    # send to the IdP, to set what specific session must be deleted
-    # @return [String] SessionIndex Value
-    #
-    def sessionindex
-      @sessionindex ||= begin
-        if node = xpath_first_from_signed_assertion("/saml:AuthnStatement")
-          node["SessionIndex"]
-        end
-      end
+    def sessionindex : String?
+      @sessionindex ||= xpath_first_from_signed_assertion("/a:AuthnStatement").try(&.[]?("SessionIndex"))
     end
 
     # Gets the Attributes from the AttributeStatement element.
-    #
-    # All attributes can be iterated over +attributes.each+ or returned as array by +attributes.all+
-    # For backwards compatibility ruby-saml returns by default only the first value for a given attribute with
-    #    attributes['name']
-    # To get all of the attributes, use:
-    #    attributes.multi('name')
-    # Or turn off the compatibility:
-    #    Saml::Attributes.single_value_compatibility = false
-    # Now this will return an array:
-    #    attributes['name']
-    #
-    # @return [Attributes] Saml::Attributes enumerable collection.
-    # @raise [ValidationError] if there are 2+ Attribute with the same Name
-    #
-    def attributes
+    # @raise [ValidationError] if :check_duplicated_attributes is set and there are 2+ Attribute with the same Name
+    def attributes : Saml::Attributes
       @attr_statements ||= begin
         attributes = Attributes.new
 
-        if stmt_elements = xpath_from_signed_assertion("/a:AttributeStatement")
-          stmt_elements.each do |stmt_element|
-            stmt_element.children.each do |attr_element|
-              next unless attr_element.element?
+        xpath_from_signed_assertion("/a:AttributeStatement").each do |stmt_element|
+          XMLUtil.element_children(stmt_element).each do |attr_element|
+            node = attr_element.name == "EncryptedAttribute" ? decrypt_attribute(attr_element) : attr_element
+            next unless node
 
-              if attr_element.name == "EncryptedAttribute"
-                node = decrypt_attribute(attr_element.dup)
-              else
-                node = attr_element
-              end
+            name = node["Name"]?
+            raise ValidationError.new("Found an Attribute element with no Name") unless name
 
-              if node && (name = node["Name"]?)
-                if options[:check_duplicated_attributes]? && attributes.includes?(name)
-                  raise ValidationError.new("Found an Attribute element with duplicated Name")
-                end
-
-                values = node.children.select{|e| e.element? }.map do |e|
-                  # if we don't have any child element nodes
-                  if e.xpath_nodes("./*").empty?
-                    # SAMLCore requires that nil AttributeValues MUST contain xsi:nil XML attribute set to "true" or "1"
-                    # otherwise the value is to be regarded as empty.
-                    ["true", "1"].includes?(e["xsi:nil"]? || e["nil"]?) ? nil : Utils.element_text(e)
-                    # explicitly support saml2:NameID with saml2:NameQualifier if supplied in attributes
-                    # this is useful for allowing eduPersonTargetedId to be passed as an opaque identifier to use to
-                    # identify the subject in an SP rather than email or other less opaque attributes
-                    # NameQualifier, if present is prefixed with a "/" to the value
-                  else
-                    e.xpath_nodes("a:NameID", { "a" => ASSERTION }).map do |n|
-                      base_path = n["NameQualifier"]? ? "#{n["NameQualifier"]}/" : ""
-                      "#{base_path}#{Utils.element_text(n)}"
-                    end
-                  end
-                end
-              else
-                raise ValidationError.new("Found an Attribute element with no Name")
-              end
-
-              attributes.add(name, values.flatten)
+            if options[:check_duplicated_attributes]? && attributes.includes?(name)
+              raise ValidationError.new("Found an Attribute element with duplicated Name")
             end
+
+            values = [] of Attributes::AttributeValue
+            XMLUtil.element_children(node).each do |value_element|
+              name_ids = XMLUtil.element_children(value_element)
+              if name_ids.empty?
+                # SAMLCore: a nil AttributeValue has xsi:nil="true" or "1"; otherwise it is empty.
+                values << (nil_value?(value_element) ? nil : Utils.element_text(value_element))
+              else
+                value_element.xpath_nodes("a:NameID", SAML_NAMESPACES).each do |name_id_element|
+                  base_path = (qualifier = name_id_element["NameQualifier"]?) ? "#{qualifier}/" : ""
+                  values << "#{base_path}#{Utils.element_text(name_id_element)}"
+                end
+              end
+            end
+
+            attributes.add(name, values)
           end
         end
         attributes
@@ -219,46 +166,35 @@ module Saml
     end
 
     # Gets the SessionNotOnOrAfter from the AuthnStatement.
-    # Could be used to set the local session expiration (expire at latest)
-    # @return [String] The SessionNotOnOrAfter value
-    #
-    def session_expires_at
-      @expires_at ||= begin
-        if node = xpath_first_from_signed_assertion("/saml:AuthnStatement")
-          parse_time(node, "SessionNotOnOrAfter")
-        end
-      end
+    def session_expires_at : Time?
+      @expires_at ||= parse_time(xpath_first_from_signed_assertion("/a:AuthnStatement"), "SessionNotOnOrAfter")
+    end
+
+    # Gets the AuthnInstant from the AuthnStatement.
+    def authn_instant : String?
+      @authn_instant ||= xpath_first_from_signed_assertion("/a:AuthnStatement").try(&.[]?("AuthnInstant"))
+    end
+
+    # Gets the AuthnContextClassRef from the AuthnStatement
+    def authn_context_class_ref : String?
+      @authn_context_class_ref ||= Utils.element_text(xpath_first_from_signed_assertion("/a:AuthnStatement/a:AuthnContext/a:AuthnContextClassRef"))
     end
 
     # Checks if the Status has the "Success" code
-    # @return [Boolean] True if the StatusCode is Sucess
-    #
-    def success?
+    def success? : Bool
       status_code == "urn:oasis:names:tc:SAML:2.0:status:Success"
     end
 
     # @return [String] StatusCode value from a SAML Response.
-    #
-    def status_code
+    def status_code : String?
       @status_code ||= begin
-        nodes = document.xpath_nodes(
-          "/p:Response/p:Status/p:StatusCode",
-          { "p" => PROTOCOL }
-        )
+        nodes = document.xpath_nodes("/p:Response/p:Status/p:StatusCode", SAML_NAMESPACES)
         if nodes.size == 1
-          node = nodes[0]
-          code = node["Value"] if node
+          code = nodes[0]["Value"]?
 
           unless code == "urn:oasis:names:tc:SAML:2.0:status:Success"
-            nodes = document.xpath_nodes(
-              "/p:Response/p:Status/p:StatusCode/p:StatusCode",
-              { "p" => PROTOCOL }
-            )
-            statuses = nodes.map do |inner_node|
-              inner_node["Value"]
-            end
-
-            code = [code, statuses].flatten.join(" | ")
+            statuses = document.xpath_nodes("/p:Response/p:Status/p:StatusCode/p:StatusCode", SAML_NAMESPACES).compact_map(&.[]?("Value"))
+            code = ([code] + statuses).compact.join(" | ")
           end
 
           code
@@ -267,215 +203,143 @@ module Saml
     end
 
     # @return [String] the StatusMessage value from a SAML Response.
-    #
-    def status_message
+    def status_message : String?
       @status_message ||= begin
-        nodes = document.xpath_nodes(
-          "/p:Response/p:Status/p:StatusMessage",
-          { "p" => PROTOCOL }
-        )
-        if nodes.size == 1
-          Utils.element_text(nodes.first)
-        end
+        nodes = document.xpath_nodes("/p:Response/p:Status/p:StatusMessage", SAML_NAMESPACES)
+        Utils.element_text(nodes[0]) if nodes.size == 1
       end
     end
 
     # Gets the Condition Element of the SAML Response if exists.
-    # (returns the first node that matches the supplied xpath)
-    # @return [XML::Node] Conditions Element if exists
-    #
-    def conditions
-      @conditions ||= xpath_first_from_signed_assertion("/saml:Conditions")
+    def conditions : XML::Node?
+      @conditions ||= xpath_first_from_signed_assertion("/a:Conditions")
     end
 
     # Gets the NotBefore Condition Element value.
-    # @return [Time] The NotBefore value in Time format
-    #
-    def not_before
+    def not_before : Time?
       @not_before ||= parse_time(conditions, "NotBefore")
     end
 
     # Gets the NotOnOrAfter Condition Element value.
-    # @return [Time] The NotOnOrAfter value in Time format
-    #
-    def not_on_or_after
+    def not_on_or_after : Time?
       @not_on_or_after ||= parse_time(conditions, "NotOnOrAfter")
     end
 
     # Gets the Issuers (from Response and Assertion).
-    # (returns the first node that matches the supplied xpath from the Response and from the Assertion)
-    # @return [Array] Array with the Issuers (XML::Node)
-    #
-    def issuers
+    # @raise [ValidationError] when the Response or the Assertion has no Issuer or more than one
+    def issuers : Array(String)
       @issuers ||= begin
-        issuer_response_nodes = document.xpath_nodes(
-          "/p:Response/a:Issuer",
-          { "p" => PROTOCOL, "a" => ASSERTION }
-        )
-
+        issuer_response_nodes = document.xpath_nodes("/p:Response/a:Issuer", SAML_NAMESPACES)
         unless issuer_response_nodes.size == 1
-          error_msg = "Issuer of the Response not found or multiple."
-          raise ValidationError.new(error_msg)
+          raise ValidationError.new("Issuer of the Response not found or multiple.")
         end
 
         issuer_assertion_nodes = xpath_from_signed_assertion("/a:Issuer")
-        unless issuer_assertion_nodes.try(&.size) == 1
-          error_msg = "Issuer of the Assertion not found or multiple."
-          raise ValidationError.new(error_msg)
+        unless issuer_assertion_nodes.size == 1
+          raise ValidationError.new("Issuer of the Assertion not found or multiple.")
         end
 
-        issuer_strings = [] of String?
-
-        issuer_response_nodes.each do |node|
-          issuer_strings << Utils.element_text(node)
-        end
-
-        issuer_assertion_nodes.not_nil!.each do |node|
-          issuer_strings << Utils.element_text(node)
-        end
-
-        issuer_strings.compact.uniq
+        (issuer_response_nodes.to_a + issuer_assertion_nodes).compact_map { |node| Utils.element_text(node) }.uniq
       end
     end
 
     # @return [String|nil] The InResponseTo attribute from the SAML Response.
-    #
-    def in_response_to
-      @in_response_to ||= begin
-        node = document.xpath_node(
-          "/p:Response",
-          { "p" => PROTOCOL }
-        )
-        if n = node
-          n["InResponseTo"]?
-        end
-      end
+    def in_response_to : String?
+      @in_response_to ||= document.xpath_node("/p:Response", SAML_NAMESPACES).try(&.[]?("InResponseTo"))
     end
 
     # @return [String|nil] Destination attribute from the SAML Response.
-    #
-    def destination
-      @destination ||= begin
-        node = document.xpath_node(
-          "/p:Response",
-          { "p" => PROTOCOL }
-        )
-        if n = node
-          n["Destination"]?
-        end
-      end
+    def destination : String?
+      @destination ||= document.xpath_node("/p:Response", SAML_NAMESPACES).try(&.[]?("Destination"))
     end
 
     # @return [Array] The Audience elements from the Contitions of the SAML Response.
-    #
-    def audiences
-      @audiences ||= begin
-        if nodes = xpath_from_signed_assertion("/saml:Conditions/saml:AudienceRestriction/saml:Audience")
-          nodes.map { |node| Utils.element_text(node) }.compact.reject(&.empty?)
-        else
-          [] of String
-        end
-      end
+    def audiences : Array(String)
+      @audiences ||= xpath_from_signed_assertion("/a:Conditions/a:AudienceRestriction/a:Audience")
+        .compact_map { |node| Utils.element_text(node) }
+        .reject(&.empty?)
     end
 
-    # returns the allowed clock drift on timing validation
-    # @return [Float]
-    def allowed_clock_drift
-      if drift = options[:allowed_clock_drift]?.as?(Int32 | Float32)
-        Time::Span.new(nanoseconds: ((drift.to_f.abs + Float32::EPSILON) * 1000000000).round.to_i)
-      else
-        Time::Span.new(seconds: 1)
+    # The allowed clock drift on timing validation (option in seconds or a Time::Span).
+    def allowed_clock_drift : Time::Span
+      case drift = options[:allowed_clock_drift]?
+      when Time::Span then drift.abs
+      when Int32, Int64, Float32, Float64
+        drift.to_f.abs.seconds
+      when String then (drift.to_f? || 0.0).abs.seconds
+      else             Time::Span.zero
       end
     end
 
     # Checks if the SAML Response contains or not an EncryptedAssertion element
-    # @return [Boolean] True if the SAML Response contains an EncryptedAssertion element
-    #
-    def assertion_encrypted?
+    def assertion_encrypted? : Bool
       !document.xpath_node(
-        "(/samlp:Response/EncryptedAssertion)|(/samlp:Response/a:EncryptedAssertion)",
-        { "samlp" => PROTOCOL, "a" => ASSERTION }
+        "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
+        SAML_NAMESPACES
       ).nil?
     end
 
-    def response_id
+    def response_id : String?
       id(document)
     end
 
-    def assertion_id
-      @assertion_id ||= begin
-        if node = xpath_first_from_signed_assertion("")
-          node["ID"]?
-        end
-      end
+    def assertion_id : String?
+      @assertion_id ||= signed_assertion.try(&.[]?("ID"))
     end
 
     # Validates the SAML Response (calls several validation methods)
-    # @param collect_errors [Boolean] Stop validation when first error appears or keep validating. (if soft=true)
-    # @return [Boolean] True if the SAML Response is valid, otherwise False if soft=True
     # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate(collect_errors = false)
+    private def validate(collect_errors = false) : Bool
       reset_errors!
       return false unless validate_response_state
 
       validations = [
-        ->{ self.validate_version },
-        ->{ self.validate_id },
-        ->{ self.validate_success_status },
-        ->{ self.validate_num_assertion },
-        ->{ self.validate_no_duplicated_attributes },
-        ->{ self.validate_signed_elements },
-        ->{ self.validate_structure },
-        ->{ self.validate_in_response_to },
-        ->{ self.validate_one_conditions },
-        ->{ self.validate_conditions },
-        ->{ self.validate_one_authnstatement },
-        ->{ self.validate_audience },
-        ->{ self.validate_destination },
-        ->{ self.validate_issuer },
-        ->{ self.validate_session_expiration },
-        ->{ self.validate_subject_confirmation },
-        -> { self.validate_name_id },
-        ->{ self.validate_signature },
+        -> { validate_version },
+        -> { validate_id },
+        -> { validate_success_status },
+        -> { validate_num_assertion },
+        -> { validate_signed_elements },
+        -> { validate_structure },
+        -> { validate_no_duplicated_attributes },
+        -> { validate_in_response_to },
+        -> { validate_signed_assertion },
+        -> { validate_one_conditions },
+        -> { validate_conditions },
+        -> { validate_one_authnstatement },
+        -> { validate_audience },
+        -> { validate_destination },
+        -> { validate_issuer },
+        -> { validate_session_expiration },
+        -> { validate_subject_confirmation },
+        -> { validate_name_id },
+        -> { validate_signature },
       ]
 
       if collect_errors
-        validations.each { |validation| validation.call }
+        validations.each(&.call)
         @error_messages.empty?
       else
-        validations.each do |validation|
-          return false unless validation.call == true
-        end
-
-        true
+        validations.all?(&.call)
       end
     end
 
     # Validates the Status of the SAML Response
-    # @return [Boolean] True if the SAML Response contains a Success code, otherwise False if soft == false
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_success_status
+    private def validate_success_status : Bool
       return true if success?
 
       error_msg = "The status code of the Response was not Success"
-      status_error_msg = Saml::Utils.status_error_msg(error_msg, status_code, status_message)
-      append_error(status_error_msg)
+      append_error(Saml::Utils.status_error_msg(error_msg, status_code, status_message))
     end
 
     # Validates the SAML Response against the specified schema.
-    # @return [Boolean] True if the XML is valid, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_structure
+    private def validate_structure : Bool
       structure_error_msg = "Invalid SAML Response. Not match the saml-schema-protocol-2.0.xsd"
       unless valid_saml?(document, soft)
         return append_error(structure_error_msg)
       end
 
-      unless decrypted_document.nil?
-        unless valid_saml?(decrypted_document, soft)
+      if decrypted = decrypted_document
+        unless valid_saml?(decrypted, soft)
           return append_error(structure_error_msg)
         end
       end
@@ -483,14 +347,14 @@ module Saml
       true
     end
 
-    # Validates that the SAML Response provided in the initialization is not empty,
-    # also check that the setting and the IdP cert were also provided
-    # @return [Boolean] True if the required info is found, false otherwise
-    #
-    private def validate_response_state
-      return append_error("Blank response") if response.empty? || response == "<blank></blank>"
+    # Validates that the SAML Response provided in the initialization is not
+    # empty, loads as XML, and that the settings carry an IdP certificate or fingerprint.
+    private def validate_response_state : Bool
+      return append_error("Blank response") if response.strip.empty?
 
-      return append_error("No settings on response") if settings.nil?
+      if load_error = document.load_error
+        return append_error(load_error)
+      end
 
       if settings.idp_cert_fingerprint.nil? && settings.idp_cert.nil? && settings.idp_cert_multi.nil?
         return append_error("No fingerprint or certificate on settings")
@@ -500,59 +364,31 @@ module Saml
     end
 
     # Validates that the SAML Response contains an ID
-    # If fails, the error is added to the errors array.
-    # @return [Boolean] True if the SAML Response contains an ID, otherwise returns False
-    #
-    private def validate_id
-      unless response_id
-        return append_error("Missing ID attribute on SAML Response")
-      end
-
+    private def validate_id : Bool
+      return append_error("Missing ID attribute on SAML Response") unless response_id
       true
     end
 
     # Validates the SAML version (2.0)
-    # If fails, the error is added to the errors array.
-    # @return [Boolean] True if the SAML Response is 2.0, otherwise returns False
-    #
-    private def validate_version
-      unless version(document) == "2.0"
-        return append_error("Unsupported SAML version")
-      end
-
+    private def validate_version : Bool
+      return append_error("Unsupported SAML version") unless version(document) == "2.0"
       true
     end
 
-    # Validates that the SAML Response only contains a single Assertion (encrypted or not).
-    # If fails, the error is added to the errors array.
-    # @return [Boolean] True if the SAML Response contains one unique Assertion, otherwise False
-    #
-    private def validate_num_assertion
+    # Validates that the SAML Response only contains a single Assertion (encrypted or not),
+    # anywhere in the document.
+    private def validate_num_assertion : Bool
       error_msg = "SAML Response must contain 1 assertion"
-      assertions = document.xpath_nodes(
-        "//a:Assertion",
-        { "a" => ASSERTION }
-      )
-      encrypted_assertions = document.xpath_nodes(
-        "//a:EncryptedAssertion",
-        { "a" => ASSERTION }
-      )
+      assertions = document.xpath_nodes("//a:Assertion", SAML_NAMESPACES)
+      encrypted_assertions = document.xpath_nodes("//a:EncryptedAssertion", SAML_NAMESPACES)
 
       unless assertions.size + encrypted_assertions.size == 1
         return append_error(error_msg)
       end
 
-      unless decrypted_document.nil?
-        if ddoc = decrypted_document
-          assertions = ddoc.xpath_nodes(
-            "//a:Assertion",
-            { "a" => ASSERTION }
-          )
-          unless assertions.size == 1
-            return append_error(error_msg)
-          end
-        else
-          return append_error("No decrypted document to check num assertions")
+      if decrypted = decrypted_document
+        unless decrypted.xpath_nodes("//a:Assertion", SAML_NAMESPACES).size == 1
+          return append_error(error_msg)
         end
       end
 
@@ -560,319 +396,256 @@ module Saml
     end
 
     # Validates that there are not duplicated attributes
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there are no duplicated attribute elements, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_no_duplicated_attributes
+    private def validate_no_duplicated_attributes : Bool
       if options[:check_duplicated_attributes]?
         begin
           attributes
         rescue e : ValidationError
-          return append_error(e.message || "Unknown error in duplicate attributes check")
+          return append_error(e.message || "Found an Attribute element with duplicated Name")
         end
       end
 
       true
     end
 
-    # Validates the Signed elements
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there is 1 or 2 Elements signed in the SAML Response
-    #                                   an are a Response or an Assertion Element, otherwise False if soft=True
-    #
-    private def validate_signed_elements
-      if doc = decrypted_document || document
-        signature_nodes = doc.xpath_nodes(
-          "//ds:Signature",
-          { "ds" => DSIG }
-        )
-        signed_elements = [] of String
-        verified_seis = [] of String
-        verified_ids = [] of String
-        signature_nodes.each do |signature_node|
-          signed_element = signature_node.parent.try(&.name)
-          if signed_element != "Response" && signed_element != "Assertion"
-            return append_error("Invalid Signature Element '#{signed_element}'. SAML Response rejected")
-          end
+    # Validates the Signed elements: one or two signatures, each a direct
+    # child of the Response or the Assertion, each referencing its parent.
+    private def validate_signed_elements : Bool
+      doc = decrypted_document || document
+      signature_nodes = doc.xpath_nodes("//ds:Signature", SAML_NAMESPACES)
+      signed_elements = [] of String
+      verified_seis = [] of String
+      verified_ids = [] of String
 
-          if parent = signature_node.parent
-            if parent["ID"]?.nil?
-              return append_error("Signed Element must contain an ID. SAML Response rejected")
-            end
-
-            id = parent["ID"]
-            if verified_ids.includes?(id)
-              return append_error("Duplicated ID. SAML Response rejected")
-            end
-            verified_ids.push(id)
-          end
-
-          # Check that reference URI matches the parent ID and no duplicate References or IDs
-          ref = signature_node.xpath_node(".//ds:Reference", { "ds" => DSIG })
-          if ref
-
-            if (uri = ref["URI"]?) && !uri.empty?
-              sei = uri[1..-1]
-
-              unless sei == id
-                return append_error("Found an invalid Signed Element. SAML Response rejected")
-              end
-
-              if verified_seis.includes?(sei)
-                return append_error("Duplicated Reference URI. SAML Response rejected")
-              end
-
-              verified_seis.push(sei)
-            end
-          end
-
-          signed_elements << signed_element if signed_element
+      signature_nodes.each do |signature_node|
+        parent = signature_node.parent
+        signed_element = parent.try(&.name)
+        if (signed_element != "Response" && signed_element != "Assertion") || !parent ||
+           !{PROTOCOL, ASSERTION}.includes?(parent.namespace.try(&.href))
+          return append_error("Invalid Signature Element '#{signed_element}'. SAML Response rejected")
         end
 
-        unless signature_nodes.size < 3 && !signed_elements.empty?
-          return append_error("Found an unexpected number of Signature Element. SAML Response rejected")
+        id = parent["ID"]?
+        return append_error("Signed Element must contain an ID. SAML Response rejected") unless id
+        return append_error("Duplicated ID. SAML Response rejected") if verified_ids.includes?(id)
+        verified_ids << id
+
+        refs = signature_node.xpath_nodes("./ds:SignedInfo/ds:Reference", SAML_NAMESPACES)
+        return append_error("Found an unexpected number of Reference elements. SAML Response rejected") if refs.size > 1
+        if (ref = refs.first?) && (uri = ref["URI"]?) && !uri.empty?
+          sei = uri[1..]
+          return append_error("Found an invalid Signed Element. SAML Response rejected") unless sei == id
+          return append_error("Duplicated Reference URI. SAML Response rejected") if verified_seis.includes?(sei)
+          verified_seis << sei
         end
 
-        if settings.security[:want_assertions_signed]? && !(signed_elements.includes? "Assertion")
-          return append_error("The Assertion of the Response is not signed and the SP requires it")
-        end
-      else
-        return append_error("No document to validate_signed_elements")
+        signed_elements << signed_element.not_nil!
+      end
+
+      unless signature_nodes.size < 3 && !signed_elements.empty?
+        return append_error("Found an unexpected number of Signature Element. SAML Response rejected")
+      end
+
+      if settings.security[:want_assertions_signed]? == true && !signed_elements.includes?("Assertion")
+        return append_error("The Assertion of the Response is not signed and the SP requires it")
       end
 
       true
     end
 
-    # Validates if the provided request_id match the inResponseTo value.
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there is no request_id or it match, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_in_response_to
-      return true unless options.has_key? :matches_request_id
-      return true if options[:matches_request_id].nil?
-      return true unless options[:matches_request_id] != in_response_to
-
-      error_msg = "The InResponseTo of the Response: #{in_response_to}, does not match the ID of the AuthNRequest sent by the SP: #{options[:matches_request_id]}"
-      append_error(error_msg)
+    # Every assertion check below reads the signed Assertion, so say plainly
+    # when there isn't one the configured IdP certificates vouch for.
+    private def validate_signed_assertion : Bool
+      return true if signed_assertion
+      append_error("No Assertion signed by the IdP was found")
     end
 
-    # Validates the Audience, (If the Audience match the Service Provider EntityID)
-    # If the response was initialized with the :skip_audience option, this validation is skipped,
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there is an Audience Element that match the Service Provider EntityID, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_audience
+    # Validates that the InResponseTo matches the :matches_request_id option, when given.
+    private def validate_in_response_to : Bool
+      return true unless options.has_key?(:matches_request_id)
+      expected = options[:matches_request_id]?
+      return true if expected.nil?
+      return true if expected.to_s == in_response_to
+
+      append_error("The InResponseTo of the Response: #{in_response_to}, does not match the ID of the AuthNRequest sent by the SP: #{expected}")
+    end
+
+    # Validates the Audience (one Audience must be the SP entity ID).
+    private def validate_audience : Bool
       return true if options[:skip_audience]?
-      return true if settings.sp_entity_id.nil? || settings.sp_entity_id.not_nil!.empty?
+      sp_entity_id = settings.sp_entity_id
+      return true if sp_entity_id.nil? || sp_entity_id.empty?
 
       if audiences.empty?
-        return true unless settings.security[:strict_audience_validation]?
-        return append_error("Invalid Audiences. The <AudienceRestriction> element contained only empty <Audience> elements. Expected audience #{settings.sp_entity_id}.")
+        return true unless settings.security[:strict_audience_validation]? == true
+        return append_error("Invalid Audiences. The <AudienceRestriction> element contained only empty <Audience> elements. Expected audience #{sp_entity_id}.")
       end
 
-      unless audiences.includes? settings.sp_entity_id
+      unless audiences.includes?(sp_entity_id)
         s = audiences.size > 1 ? "s" : ""
-        error_msg = "Invalid Audience#{s}. The audience#{s} #{audiences.join(",")}, did not match the expected audience #{settings.sp_entity_id}"
-        return append_error(error_msg)
+        return append_error("Invalid Audience#{s}. The audience#{s} #{audiences.join(",")}, did not match the expected audience #{sp_entity_id}")
       end
 
       true
     end
 
-    # Validates the Destination, (If the SAML Response is received where expected).
-    # If the response was initialized with the :skip_destination option, this validation is skipped,
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there is a Destination element that matches the Consumer Service URL, otherwise False
-    #
-    private def validate_destination
-      return true if destination.nil?
+    # Validates the Destination (when present) against the ACS URL.
+    private def validate_destination : Bool
+      dest = destination
+      return true if dest.nil?
       return true if options[:skip_destination]?
 
-      if destination.nil? || destination.not_nil!.empty?
-        error_msg = "The response has an empty Destination value"
-        return append_error(error_msg)
-      end
+      return append_error("The response has an empty Destination value") if dest.empty?
 
-      return true if settings.assertion_consumer_service_url.nil? || settings.assertion_consumer_service_url.not_nil!.empty?
+      acs_url = settings.assertion_consumer_service_url
+      return true if acs_url.nil? || acs_url.empty?
 
-      unless destination && Saml::Utils.uri_match?(destination.not_nil!, settings.assertion_consumer_service_url.not_nil!)
-        error_msg = "The response was received at #{destination} instead of #{settings.assertion_consumer_service_url}"
-        return append_error(error_msg)
+      unless Saml::Utils.uri_match?(dest, acs_url)
+        return append_error("The response was received at #{dest} instead of #{acs_url}")
       end
 
       true
     end
 
-    # Checks that the samlp:Response/saml:Assertion/saml:Conditions element exists and is unique.
-    # (If the response was initialized with the :skip_conditions option, this validation is skipped)
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there is a conditions element and is unique
-    #
-    private def validate_one_conditions
+    # Checks that the Assertion has exactly one Conditions element.
+    private def validate_one_conditions : Bool
       return true if options[:skip_conditions]?
 
-      conditions_nodes = xpath_from_signed_assertion("/saml:Conditions") || [] of XML::NodeSet
-      unless conditions_nodes.size == 1
-        error_msg = "The Assertion must include one Conditions element"
-        return append_error(error_msg)
+      unless xpath_from_signed_assertion("/a:Conditions").size == 1
+        return append_error("The Assertion must include one Conditions element")
       end
 
       true
     end
 
-    # Checks that the samlp:Response/saml:Assertion/saml:AuthnStatement element exists and is unique.
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if there is a authnstatement element and is unique
-    #
-    private def validate_one_authnstatement
+    # Checks that the Assertion has exactly one AuthnStatement element.
+    private def validate_one_authnstatement : Bool
       return true if options[:skip_authnstatement]?
 
-      authnstatement_nodes = xpath_from_signed_assertion("/saml:AuthnStatement") || [] of XML::Node
-      unless authnstatement_nodes.size == 1
-        error_msg = "The Assertion must include one AuthnStatement element"
-        return append_error(error_msg)
+      unless xpath_from_signed_assertion("/a:AuthnStatement").size == 1
+        return append_error("The Assertion must include one AuthnStatement element")
       end
 
       true
     end
 
-    # Validates the Conditions. (If the response was initialized with the :skip_conditions option, this validation is skipped,
-    # If the response was initialized with the :allowed_clock_drift option, the timing validations are relaxed by the allowed_clock_drift value)
-    # @return [Boolean] True if satisfies the conditions, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_conditions
+    # Validates the Conditions' NotBefore and NotOnOrAfter, relaxed by the allowed clock drift.
+    private def validate_conditions : Bool
       return true if conditions.nil?
       return true if options[:skip_conditions]?
 
       now = Time.utc
-      if cutoff = not_before
-        if now < (cutoff - allowed_clock_drift)
-          error_msg = "Current time is earlier than NotBefore condition (#{now} < #{cutoff}#{" - #{allowed_clock_drift.seconds}s"})"
-          return append_error(error_msg)
+      drift = allowed_clock_drift
+      begin
+        if (cutoff = not_before) && now < (cutoff - drift)
+          return append_error("Current time is earlier than NotBefore condition (#{now} < #{cutoff}#{drift_note(drift, "-")})")
         end
-      end
 
-      if cutoff = not_on_or_after
-        if now >= (cutoff + allowed_clock_drift)
-          error_msg = "Current time is on or after NotOnOrAfter condition (#{now} >= #{cutoff}#{" + #{allowed_clock_drift.seconds}s"})"
-          return append_error(error_msg)
+        if (cutoff = not_on_or_after) && now >= (cutoff + drift)
+          return append_error("Current time is on or after NotOnOrAfter condition (#{now} >= #{cutoff}#{drift_note(drift, "+")})")
         end
+      rescue e : ValidationError
+        return append_error(e.message || "Invalid Conditions time")
       end
 
       true
     end
 
     # Validates the Issuer (Of the SAML Response and the SAML Assertion)
-    # @param soft [Boolean] soft Enable or Disable the soft mode (In order to raise exceptions when the response is invalid or not)
-    # @return [Boolean] True if the Issuer matchs the IdP entityId, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_issuer
-      return true if settings.idp_entity_id.nil?
+    private def validate_issuer : Bool
+      idp_entity_id = settings.idp_entity_id
+      return true if idp_entity_id.nil?
 
       begin
         obtained_issuers = issuers
-      rescue  e : ValidationError
-        return append_error(e.message || "Unknown error in validate_issuer")
+      rescue e : ValidationError
+        return append_error(e.message || "Issuer not found")
       end
 
       obtained_issuers.each do |issuer|
-        unless Saml::Utils.uri_match?(issuer, settings.idp_entity_id.not_nil!)
-          error_msg = "Doesn't match the issuer, expected: <#{settings.idp_entity_id}>, but was: <#{issuer}>"
-          return append_error(error_msg)
+        unless Saml::Utils.uri_match?(issuer, idp_entity_id)
+          return append_error("Doesn't match the issuer, expected: <#{idp_entity_id}>, but was: <#{issuer}>")
         end
       end
 
       true
     end
 
-    # Validates that the Session haven't expired (If the response was initialized with the :allowed_clock_drift option,
-    # this time validation is relaxed by the allowed_clock_drift value)
-    # If fails, the error is added to the errors array
-    # @param soft [Boolean] soft Enable or Disable the soft mode (In order to raise exceptions when the response is invalid or not)
-    # @return [Boolean] True if the SessionNotOnOrAfter of the AuthnStatement is valid, otherwise (when expired) False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_session_expiration
-      if expires_at = session_expires_at
-        now = Time.utc
-        unless now < (expires_at.not_nil! + allowed_clock_drift)
-          error_msg = "The attributes have expired, based on the SessionNotOnOrAfter of the AuthnStatement of this Response"
-          return append_error(error_msg)
-        end
+    # Validates that the Session haven't expired
+    private def validate_session_expiration : Bool
+      begin
+        expires_at = session_expires_at
+      rescue e : ValidationError
+        return append_error(e.message || "Invalid SessionNotOnOrAfter")
+      end
+      return true unless expires_at
+
+      unless Time.utc < (expires_at + allowed_clock_drift)
+        return append_error("The attributes have expired, based on the SessionNotOnOrAfter of the AuthnStatement of this Response")
       end
 
       true
     end
 
-    # Validates if exists valid SubjectConfirmation (If the response was initialized with the :allowed_clock_drift option,
-    # timing validation are relaxed by the allowed_clock_drift value. If the response was initialized with the
-    # :skip_subject_confirmation option, this validation is skipped)
-    # There is also an optional Recipient check
-    # If fails, the error is added to the errors array
-    # @return [Boolean] True if exists a valid SubjectConfirmation, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_subject_confirmation
+    # Validates that a bearer SubjectConfirmation with valid data exists.
+    private def validate_subject_confirmation : Bool
       return true if options[:skip_subject_confirmation]?
       valid_subject_confirmation = false
+      now = Time.utc
+      drift = allowed_clock_drift
 
-      if subject_confirmation_nodes = xpath_from_signed_assertion("/saml:Subject/saml:SubjectConfirmation")
-        now = Time.utc
-        subject_confirmation_nodes.each do |subject_confirmation|
-          if subject_confirmation["Method"]? && subject_confirmation["Method"] != "urn:oasis:names:tc:SAML:2.0:cm:bearer"
+      xpath_from_signed_assertion("/a:Subject/a:SubjectConfirmation").each do |subject_confirmation|
+        if (method = subject_confirmation["Method"]?) && method != "urn:oasis:names:tc:SAML:2.0:cm:bearer"
+          next
+        end
+
+        confirmation_data_node = subject_confirmation.xpath_node("a:SubjectConfirmationData", SAML_NAMESPACES)
+        next unless confirmation_data_node
+
+        begin
+          irt = confirmation_data_node["InResponseTo"]?
+          next if irt && irt != in_response_to
+
+          if (nb = parse_time(confirmation_data_node, "NotBefore")) && now < (nb - drift)
             next
           end
 
-          confirmation_data_node = subject_confirmation.xpath_node(
-            "saml:SubjectConfirmationData",
-            { "saml" => ASSERTION }
-          )
-
-          next unless confirmation_data_node
-
-          next if (confirmation_data_node["InResponseTo"]? && confirmation_data_node["InResponseTo"] != in_response_to) ||
-                  (confirmation_data_node["Recipient"]? && !options[:skip_recipient_check]? && settings && confirmation_data_node["Recipient"] != settings.assertion_consumer_service_url)
-
-          if not_before = parse_time(confirmation_data_node, "NotBefore")
-            next if (confirmation_data_node["NotBefore"]? && now < (not_before - allowed_clock_drift))
+          if (noa = parse_time(confirmation_data_node, "NotOnOrAfter")) && now >= (noa + drift)
+            next
           end
-
-          if not_on_or_after = parse_time(confirmation_data_node, "NotOnOrAfter")
-            next if (confirmation_data_node["NotOnOrAfter"]? && now >= (not_on_or_after + allowed_clock_drift))
-          end
-
-          valid_subject_confirmation = true
-          break
+        rescue ValidationError
+          next
         end
+
+        recipient = confirmation_data_node["Recipient"]?
+        next if recipient && !options[:skip_recipient_check]? && recipient != settings.assertion_consumer_service_url
+
+        valid_subject_confirmation = true
+        break
       end
 
-      if !valid_subject_confirmation
-        error_msg = "A valid SubjectConfirmation was not found on this Response"
-        return append_error(error_msg)
+      unless valid_subject_confirmation
+        return append_error("A valid SubjectConfirmation was not found on this Response")
       end
 
       true
     end
 
     # Validates the NameID element
-    private def validate_name_id
+    private def validate_name_id : Bool
       if name_id_node.nil?
-        if settings.security[:want_name_id]?
+        if settings.security[:want_name_id]? == true
           return append_error("No NameID element found in the assertion of the Response")
         end
       else
-        if name_id.nil? || name_id.not_nil!.empty?
-          return append_error("An empty NameID value found")
-        end
+        value = name_id
+        return append_error("An empty NameID value found") if value.nil? || value.empty?
 
-        unless settings.sp_entity_id.nil? || settings.sp_entity_id.not_nil!.empty? || name_id_spnamequalifier.nil? || name_id_spnamequalifier.not_nil!.empty?
-          if name_id_spnamequalifier != settings.sp_entity_id
-            return append_error("The SPNameQualifier value mistmatch the SP entityID value.")
+        sp_entity_id = settings.sp_entity_id
+        qualifier = name_id_spnamequalifier
+        unless sp_entity_id.nil? || sp_entity_id.empty? || qualifier.nil? || qualifier.empty?
+          if qualifier != sp_entity_id
+            return append_error("SPNameQualifier value does not match the SP entityID value.")
           end
         end
       end
@@ -880,276 +653,319 @@ module Saml
       true
     end
 
-    # Validates the Signature
-    # @return [Boolean] True if not contains a Signature or if the Signature is valid, otherwise False if soft=True
-    # @raise [ValidationError] if soft == false and validation fails
-    #
-    private def validate_signature
+    # Verifies every signature the Response carries: the Response's own and
+    # the Assertion's (decrypted when it was encrypted). Only the configured
+    # IdP certificates are trusted; in fingerprint mode the signature's own
+    # KeyInfo certificate is used once its fingerprint matches.
+    private def validate_signature : Bool
       error_msg = "Invalid Signature on SAML Response"
 
-      # If the response contains the signature, and the assertion was encrypted, validate the original SAML Response
-      # otherwise, review if the decrypted assertion contains a signature
-      sig_elements = document.xpath_nodes(
-        "/p:Response[@ID=$id]/ds:Signature",
-        { "p" => PROTOCOL, "ds" => DSIG },
-        { "id" => document.signed_element_id }
-      )
-
-      use_original = sig_elements.size == 1 || decrypted_document.nil?
-      if doc = use_original ? document : decrypted_document
-        # Check signature nodes
-        if sig_elements.nil? || sig_elements.size == 0
-          sig_elements = doc.xpath_nodes(
-            "/samlp:Response/saml:Assertion[@ID=$id]/ds:Signature",
-            { "samlp" => PROTOCOL, "saml" => ASSERTION, "ds" => DSIG },
-            { "id" => doc.signed_element_id }
-          )
+      targets = signature_targets
+      if targets.empty?
+        if id = document.signed_element_id
+          append_error("Signed element id ##{id} is not found")
+        else
+          append_error("No signature found on the Response or its Assertion")
         end
+        return append_error(error_msg)
+      end
 
-        if sig_elements.size != 1
-          if sig_elements.size == 0
-            append_error("Signed element id ##{doc.signed_element_id} is not found")
-          else
-            append_error("Signed element id ##{doc.signed_element_id} is found more than once")
-          end
+      certificates = settings.idp_signing_certificates
+      fingerprint = certificates.empty? ? settings.get_fingerprint : nil
+      if certificates.empty? && fingerprint.nil?
+        return append_error("No fingerprint or certificate on settings")
+      end
+
+      targets.each do |doc, sig|
+        ref = doc.reference_for(sig)
+        if ref.is_a?(String)
+          append_error(ref, true)
           return append_error(error_msg)
         end
 
-        old_errors = @error_messages.clone
+        cert = if fingerprint
+                 verify_with_fingerprint(doc, ref, fingerprint)
+               else
+                 verify_with_certificates(doc, ref, certificates)
+               end
+        return append_error(error_msg) unless cert
 
-        idp_certs = settings.get_idp_cert_multi
-        if idp_certs.nil? || idp_certs[:signing].empty?
-          opts = {} of Symbol => String | OpenSSL::X509::Certificate
-          if algo = settings.idp_cert_fingerprint_algorithm
-            opts[:fingerprint_alg] = algo
-          end
-          fingerprint = settings.get_fingerprint
-          if idp_cert = settings.get_idp_cert
-            opts[:cert] = idp_cert
-          end
-
-          if fingerprint && doc.validate_document(fingerprint, @soft, opts)
-            if settings.security[:check_idp_cert_expiration]?
-              if Saml::Utils.is_cert_expired(idp_cert)
-                error_msg = "IdP x509 certificate expired"
-                return append_error(error_msg)
-              end
-            end
-          else
-            return append_error(error_msg)
-          end
-        else
-          valid = false
-          expired = false
-          idp_certs[:signing].each do |idp_cert|
-            valid = doc.validate_document_with_cert(idp_cert, true)
-            if valid
-              if settings.security[:check_idp_cert_expiration]?
-                if Saml::Utils.is_cert_expired(idp_cert)
-                  expired = true
-                end
-              end
-
-              # At least one certificate is valid, restore the old accumulated errors
-              @error_messages = old_errors
-              break
-            end
-          end
-          if expired
-            error_msg = "IdP x509 certificate expired"
-            return append_error(error_msg)
-          end
-          unless valid
-            # Remove duplicated errors
-            @error_messages = @error_messages.uniq
-            return append_error(error_msg)
-          end
+        if settings.security[:check_idp_cert_expiration]? == true && Saml::Utils.is_cert_expired(cert)
+          return append_error("IdP x509 certificate expired")
         end
-      else
-        return append_error("Document not found")
       end
 
       true
     end
 
-    private def name_id_node
-      @name_id_node ||=
-        begin
-          encrypted_node = xpath_first_from_signed_assertion("/saml:Subject/saml:EncryptedID")
-          if encrypted_node
-            node = decrypt_nameid(encrypted_node)
-          else
-            node = xpath_first_from_signed_assertion("/saml:Subject/saml:NameID")
-          end
+    private def verify_with_certificates(doc, ref, certificates) : OpenSSL::X509::Certificate?
+      if text = ref.key_info_certificate_text
+        key_info_cert = doc.load_cert(text)
+        unless key_info_cert
+          append_error("Document Certificate Error", true)
+          return nil
         end
+        unless certificates.any? { |cert| cert.to_der == key_info_cert.to_der }
+          append_error("Certificate of the Signature element does not match provided certificate", true)
+          return nil
+        end
+      end
+
+      verified_certificate(doc, ref, certificates)
     end
 
-    # Extracts the first appearance that matchs the subelt (pattern)
-    # Search on any Assertion that is signed, or has a Response parent signed
-    # @param subelt [String] The XPath pattern
-    # @return [XML::Node | nil] If any matches, return the Element
-    #
-    private def xpath_first_from_signed_assertion(subelt = nil)
-      if doc = decrypted_document.nil? ? document : decrypted_document
-        node = doc.xpath_node(
-          "/samlp:Response/saml:Assertion[@ID=$id]#{subelt}",
-          { "samlp" => PROTOCOL, "saml" => ASSERTION },
-          { "id" => doc.signed_element_id }
-        )
-        node ||= doc.xpath_node(
-          "/samlp:Response[@ID=$id]/saml:Assertion#{subelt}",
-          { "samlp" => PROTOCOL, "saml" => ASSERTION },
-          { "id" => doc.signed_element_id }
-        )
-        node
-      else
-        nil
+    private def verify_with_fingerprint(doc, ref, fingerprint) : OpenSSL::X509::Certificate?
+      text = ref.key_info_certificate_text
+      unless text
+        append_error("Certificate element missing in response (ds:X509Certificate) and not cert provided at settings", true)
+        return nil
       end
+
+      cert = doc.load_cert(text)
+      unless cert
+        append_error("Document Certificate Error", true)
+        return nil
+      end
+
+      digest = XMLSecurity::BaseDocument.algorithm(settings.idp_cert_fingerprint_algorithm)
+      digest << cert.to_der
+      expected = fingerprint.gsub(/[^a-zA-Z0-9]/, "").downcase
+      unless Crypto::Subtle.constant_time_compare(digest.hexfinal.to_slice, expected.to_slice)
+        append_error("Fingerprint mismatch", true)
+        return nil
+      end
+
+      verified_certificate(doc, ref, [cert])
     end
 
-    # Extracts all the appearances that matchs the subelt (pattern)
-    # Search on any Assertion that is signed, or has a Response parent signed
-    # @param subelt [String] The XPath pattern
-    # @return [Array of XML::Node] Return all matches
-    #
-    private def xpath_from_signed_assertion(subelt = nil)
-      if doc = decrypted_document.nil? ? document : decrypted_document
-
-        nodes = doc.xpath_nodes(
-          "/samlp:Response/saml:Assertion[@ID=$id]#{subelt}",
-          { "samlp" => PROTOCOL, "saml" => ASSERTION },
-          { "id" => doc.signed_element_id }
-        )
-
-        more_nodes = doc.xpath_nodes(
-          "/samlp:Response[@ID=$id]/saml:Assertion#{subelt}",
-          { "samlp" => PROTOCOL, "saml" => ASSERTION },
-          { "id" => doc.signed_element_id }
-        )
-
-        more_nodes.each do |node|
-          nodes << node
-        end
-
-        nodes
+    private def verified_certificate(doc, ref, certificates) : OpenSSL::X509::Certificate?
+      unless ref.digest_matches?
+        append_error("Digest mismatch", true)
+        return nil
       end
+
+      cert = certificates.find { |candidate| ref.signature_valid?(candidate) }
+      append_error("Key validation error", true) unless cert
+      cert
+    end
+
+    # The signatures to verify, with the document each lives in.
+    private def signature_targets : Array({XMLSecurity::SignedDocument, XML::Node})
+      targets = [] of {XMLSecurity::SignedDocument, XML::Node}
+      if sig = response_signature
+        targets << {document, sig}
+      end
+      assertion_doc = decrypted_document || document
+      if sig = assertion_signature(assertion_doc)
+        targets << {assertion_doc, sig}
+      end
+      targets
+    end
+
+    private def response_signature : XML::Node?
+      XMLUtil.only_node(document, "/p:Response/ds:Signature", SAML_NAMESPACES)
+    end
+
+    private def assertion_signature(doc : XMLSecurity::SignedDocument) : XML::Node?
+      XMLUtil.only_node(doc, "/p:Response/a:Assertion/ds:Signature", SAML_NAMESPACES)
+    end
+
+    private def name_id_node : XML::Node?
+      return @name_id_node if @name_id_resolved
+      # Resolved only on success, so a missing key raises on every call.
+      node = if encrypted_node = xpath_first_from_signed_assertion("/a:Subject/a:EncryptedID")
+               decrypt_nameid(encrypted_node)
+             else
+               xpath_first_from_signed_assertion("/a:Subject/a:NameID")
+             end
+      @name_id_resolved = true
+      @name_id_node = node
+    end
+
+    # The Assertion as its signature covers it: from the Assertion's own
+    # signature when it has one, else from the Response's signature (an
+    # EncryptedAssertion is decrypted from those verified bytes).
+    private def signed_assertion : XML::Node?
+      return @signed_assertion if @signed_assertion_resolved
+      @signed_assertion_resolved = true
+      @signed_assertion = find_signed_assertion
+    end
+
+    private def find_signed_assertion : XML::Node?
+      assertion_doc = decrypted_document || document
+
+      if sig = assertion_signature(assertion_doc)
+        root = verified_root(assertion_doc, sig)
+        return root if root && root.name == "Assertion" && root.namespace.try(&.href) == ASSERTION
+        return nil
+      end
+
+      if (sig = response_signature) && (root = verified_root(document, sig))
+        return nil unless root.name == "Response" && root.namespace.try(&.href) == PROTOCOL
+
+        assertions = root.xpath_nodes("./a:Assertion", SAML_NAMESPACES)
+        encrypted = root.xpath_nodes("./a:EncryptedAssertion | ./EncryptedAssertion", SAML_NAMESPACES)
+        if assertions.size == 1 && encrypted.empty?
+          return assertions[0]
+        elsif assertions.empty? && encrypted.size == 1
+          return decrypt_assertion(encrypted[0])
+        end
+      end
+
+      nil
+    end
+
+    # Re-parses the canonical bytes a signature covers.
+    private def verified_root(doc : XMLSecurity::SignedDocument, sig : XML::Node) : XML::Node?
+      ref = doc.reference_for(sig)
+      return nil unless ref.is_a?(XMLSecurity::SignedReference)
+      return nil unless trusted?(doc, ref)
+
+      parsed = XMLUtil.safe_parse(ref.canonical_xml)
+      @owned_documents << parsed
+      root = parsed.root
+      root && root["ID"]? == ref.element_id ? root : nil
+    rescue XMLLoadError
+      nil
+    end
+
+    # Whether the reference's digest and signature check out against the
+    # configured IdP certificates (or the fingerprinted KeyInfo one), so the
+    # getters never return data from a forged signature.
+    private def trusted?(doc : XMLSecurity::SignedDocument, ref : XMLSecurity::SignedReference) : Bool
+      certificates = settings.idp_signing_certificates
+      fingerprint = settings.get_fingerprint
+      # Nothing to verify with: is_valid? fails anyway, reads stay as in ruby-saml.
+      return true if certificates.empty? && fingerprint.nil?
+      return false unless ref.digest_matches?
+
+      if certificates.empty?
+        text = ref.key_info_certificate_text
+        return false unless fingerprint && text && (cert = doc.load_cert(text))
+
+        digest = XMLSecurity::BaseDocument.algorithm(settings.idp_cert_fingerprint_algorithm)
+        digest << cert.to_der
+        expected = fingerprint.gsub(/[^a-zA-Z0-9]/, "").downcase
+        return false unless Crypto::Subtle.constant_time_compare(digest.hexfinal.to_slice, expected.to_slice)
+        certificates = [cert]
+      end
+
+      certificates.any? { |cert| ref.signature_valid?(cert) }
+    end
+
+    # First match of *subelt* under the signed Assertion.
+    private def xpath_first_from_signed_assertion(subelt = nil) : XML::Node?
+      xpath_from_signed_assertion(subelt).first?
+    end
+
+    # All matches of *subelt* (e.g. "/a:Conditions") under the signed Assertion.
+    private def xpath_from_signed_assertion(subelt = nil) : Array(XML::Node)
+      assertion = signed_assertion
+      return [] of XML::Node unless assertion
+      return [assertion] if subelt.nil? || subelt.empty?
+
+      assertion.xpath_nodes(".#{subelt}", SAML_NAMESPACES).to_a
     end
 
     # Generates the decrypted_document
-    # @return [XMLSecurity::SignedDocument] The SAML Response with the assertion decrypted
-    #
-    private def generate_decrypted_document
-      if !self.settings.try(&.get_sp_key)
+    private def generate_decrypted_document : XMLSecurity::SignedDocument
+      if settings.get_sp_decryption_keys.empty?
         raise ValidationError.new("An EncryptedAssertion found and no SP private key found on the settings to decrypt it. Be sure you provided the :settings parameter at the initialize method")
       end
 
-      document_copy = XMLSecurity::SignedDocument.new(response)
-
-      decrypt_assertion_from_document(document_copy)
+      decrypt_assertion_from_document(XMLSecurity::SignedDocument.new(response))
     end
 
-    # Obtains a SAML Response with the EncryptedAssertion element decrypted
-    # @param document_copy [XMLSecurity::SignedDocument] A copy of the original SAML Response with the encrypted assertion
-    # @return [XMLSecurity::SignedDocument] The SAML Response with the assertion decrypted
-    #
-    private def decrypt_assertion_from_document(document_copy)
-      if response_node = document_copy.xpath_node(
-          "/p:Response",
-          { "p" => PROTOCOL }
-        )
-        if encrypted_assertion_node = document_copy.xpath_node("(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",{ "p" => PROTOCOL, "a" => ASSERTION })
-          if decrypted = decrypt_assertion(encrypted_assertion_node)
-            response_node << decrypted
-          else
-            raise "Could not decrypt the EncryptedAssertion element"
-          end
-          encrypted_assertion_node.unlink
-          XMLSecurity::SignedDocument.new(response_node.to_xml(options: XML::SaveOptions::NO_EMPTY))
-        else
-          raise "Could not find an EncryptedAssertion element in the response"
-        end
-      else
-        raise "Could not find Response node"
-      end
+    # A copy of the Response with its EncryptedAssertion replaced by the decrypted Assertion.
+    private def decrypt_assertion_from_document(document_copy : XMLSecurity::SignedDocument) : XMLSecurity::SignedDocument
+      raise ValidationError.new(document_copy.load_error.not_nil!) unless document_copy.loaded?
+
+      encrypted_assertion_node = document_copy.xpath_node(
+        "(/p:Response/EncryptedAssertion)|(/p:Response/a:EncryptedAssertion)",
+        SAML_NAMESPACES
+      )
+      raise ValidationError.new("Could not find an EncryptedAssertion element in the response") unless encrypted_assertion_node
+
+      decrypted = decrypt_assertion(encrypted_assertion_node)
+      raise ValidationError.new("Could not decrypt the EncryptedAssertion element") unless decrypted
+
+      target = document_copy.xml_document.to_unsafe.as(LibXML::Doc*)
+      copy = LibSamlXML.xmlDocCopyNode(decrypted.to_unsafe, target, 1)
+      raise ValidationError.new("Could not decrypt the EncryptedAssertion element") if copy.null?
+      LibSamlXML.xmlAddPrevSibling(encrypted_assertion_node.to_unsafe, copy)
+      encrypted_assertion_node.unlink
+
+      XMLSecurity::SignedDocument.new(document_copy.to_s)
     end
 
     # Decrypts an EncryptedAssertion element
-    # @param encrypted_assertion_node [XML::Node] The EncryptedAssertion element
-    # @return [XML::Node] The decrypted EncryptedAssertion element
-    #
-    private def decrypt_assertion(encrypted_assertion_node : XML::Node)
+    private def decrypt_assertion(encrypted_assertion_node : XML::Node) : XML::Node?
       decrypt_element(encrypted_assertion_node, /(.*<\/(\w+:)?Assertion>)/m)
     end
 
     # Decrypts an EncryptedID element
-    # @param encryptedid_node [XML::Node] The EncryptedID element
-    # @return [XML::Node] The decrypted EncrypedtID element
-    #
-    private def decrypt_nameid(encryptedid_node : XML::Node)
-      decrypt_element(encryptedid_node, /(.*<\/(\w+:)?NameID>)/m)
+    private def decrypt_nameid(encrypted_id_node : XML::Node) : XML::Node?
+      decrypt_element(encrypted_id_node, /(.*<\/(\w+:)?NameID>)/m)
     end
 
-    # Decrypts an EncryptedID element
-    # @param encryptedid_node [XML::Node] The EncryptedID element
-    # @return [XML::Node] The decrypted EncrypedtID element
-    #
-    private def decrypt_attribute(encryptedattribute_node : XML::Node)
-      decrypt_element(encryptedattribute_node, /(.*<\/(\w+:)?Attribute>)/m)
+    # Decrypts an EncryptedAttribute element
+    private def decrypt_attribute(encrypted_attribute_node : XML::Node) : XML::Node?
+      decrypt_element(encrypted_attribute_node, /(.*<\/(\w+:)?Attribute>)/m)
     end
 
-    # Decrypt an element
-    # @param encryptedid_node [XML::Node] The encrypted element
-    # @param rgrex string Regex
-    # @return [XML::Node] The decrypted element
-    #
-    private def decrypt_element(encrypt_node : XML::Node, rgrex)
-      if !settings.get_sp_key
-        raise ValidationError.new("An " + (encrypt_node.try(&.name) || "unknown node name") + " found and no SP private key found on the settings to decrypt it")
+    # Decrypts an element with the SP keys. The plaintext must be exactly one
+    # well-formed element.
+    private def decrypt_element(encrypt_node : XML::Node, regexp : Regex) : XML::Node?
+      keys = settings.get_sp_decryption_keys
+      if keys.empty?
+        raise ValidationError.new("An #{encrypt_node.name} found and no SP private key found on the settings to decrypt it")
       end
 
-      if encrypt_node.name == "EncryptedAttribute"
-        node_header = "<node xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
-      else
-        node_header = "<node xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\">"
+      node_header = if encrypt_node.name == "EncryptedAttribute"
+                      %(<node xmlns:saml="#{ASSERTION}" xmlns:xsi="#{XSI}">)
+                    else
+                      %(<node xmlns:saml="#{ASSERTION}">)
+                    end
+
+      plaintext = Saml::Utils.decrypt_multi(encrypt_node, keys)
+      return nil unless plaintext && (match = plaintext.match(regexp))
+
+      parsed = begin
+        XMLUtil.safe_parse(node_header + match[0] + "</node>")
+      rescue XMLLoadError
+        return nil
       end
+      @owned_documents << parsed
 
-      elem_plaintext = Saml::Utils.decrypt_data(encrypt_node, self.settings.get_sp_key_text)
-
-      if elem_plaintext = elem_plaintext.to_s
-        begin
-          if match = elem_plaintext.to_s.match(rgrex)
-            elem_plaintext = match[0]
-          end
-        rescue
-          return nil
-        end
-
-        # To avoid namespace errors if saml namespace is not defined
-        # create a parent node first with the namespace defined
-        elem_plaintext = node_header + elem_plaintext + "</node>"
-        if root = XML.parse(elem_plaintext).try(&.root)
-          root.children.first
-        else
-          nil
-        end
-      else
-        nil
-      end
+      wrapper = parsed.root
+      return nil unless wrapper
+      children = XMLUtil.element_children(wrapper)
+      children.size == 1 ? children[0] : nil
     end
 
-    # Parse the attribute of a given node in Time format
-    # @param node [XML:Node] The node
-    # @param attribute [String] The attribute name
-    # @return [Time|nil] The parsed value
-    #
-    private def parse_time(node, attribute)
-      if (n = node) && (rawtime = node[attribute]?)
-        Time::Format::RFC_3339.parse(rawtime)
+    private def nil_value?(element : XML::Node) : Bool
+      element.attributes.each do |attribute|
+        next unless attribute.name == "nil"
+        next unless attribute.namespace.try(&.href) == XSI
+        return {"true", "1"}.includes?(attribute.content)
       end
+      false
     end
 
-    private def settings!
-      self.settings.not_nil!
+    private def drift_note(drift : Time::Span, sign : String) : String
+      " #{sign} #{(drift.total_seconds + Float64::EPSILON).ceil.to_i}s"
+    end
+
+    # Parses a time attribute. A value that isn't a valid xs:dateTime raises,
+    # so a broken condition never counts as no condition.
+    private def parse_time(node : XML::Node?, attribute : String) : Time?
+      return nil unless node
+      raw = node[attribute]?
+      return nil unless raw
+
+      Time::Format::RFC_3339.parse(raw)
+    rescue Time::Format::Error
+      raise ValidationError.new("Invalid #{attribute} value: #{raw}")
     end
   end
 end

@@ -1,30 +1,27 @@
 require "./spec_helper"
 
-require "onelogin/ruby-saml/attributes"
+describe "Attributes" do
+  let(:attributes) do
+    Saml::Attributes.new({
+      "email"                                                           => ["tom@hanks.com"] of String?,
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname" => ["Tom"] of String?,
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"   => ["Hanks"] of String?,
+    })
+  end
 
-class AttributesTest < Minitest::Test
-  describe "Attributes" do
-    let(:attributes) do
-      Saml::Attributes.new({
-        "email"                                                           => ["tom@hanks.com"],
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname" => ["Tom"],
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"   => ["Hanks"],
-      })
-    end
+  # This port's #fetch returns all values of the attribute (ruby-saml returns the first one).
+  it "fetches string attribute" do
+    assert_equal(["tom@hanks.com"], attributes.fetch("email"))
+  end
 
-    it "fetches string attribute" do
-      assert_equal("tom@hanks.com", attributes.fetch("email"))
-    end
+  it "fetches symbol attribute" do
+    assert_equal(["tom@hanks.com"], attributes.fetch(:email))
+  end
 
-    it "fetches symbol attribute" do
-      assert_equal("tom@hanks.com", attributes.fetch(:email))
-    end
-
-    it "fetches regexp attribute" do
-      assert_equal("Tom", attributes.fetch(/givenname/))
-      assert_equal("Tom", attributes.fetch(/gi(.*)/))
-      assert_nil(attributes.fetch(/^z.*/))
-      assert_equal("Hanks", attributes.fetch(/surname/))
-    end
+  it "fetches regexp attribute" do
+    assert_equal(["Tom"], attributes.fetch(/givenname/))
+    assert_equal(["Tom"], attributes.fetch(/gi(.*)/))
+    assert_nil(attributes.fetch(/^z.*/))
+    assert_equal(["Hanks"], attributes.fetch(/surname/))
   end
 end

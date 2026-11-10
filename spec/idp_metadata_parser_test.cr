@@ -1,20 +1,52 @@
 require "./spec_helper"
+require "http/server"
 
-require "onelogin/ruby-saml/idp_metadata_parser"
+# The client refusing the self-signed certificate is the expected outcome, not server noise.
+class QuietTLSServer < HTTP::Server
+  private def handle_client(io : IO)
+    super
+  rescue OpenSSL::SSL::Error
+  end
+end
 
-class IdpMetadataParserTest < Minitest::Test
-  class MockSuccessResponse < Net::HTTPSuccess
-    # override parent's initialize
-    def initialize; end
+describe "IdpMetadataParser" do
+  @idp_metadata_parser = Saml::IdpMetadataParser.new
+  @idp_metadata = ""
+  @settings = Saml::Settings.new
+  @expected_cert : String?
 
-    property :body
+  def time(value : String) : Time
+    Time::Format::ISO_8601_DATE_TIME.parse(value)
   end
 
-  class MockFailureResponse < Net::HTTPNotFound
-    # override parent's initialize
-    def initialize; end
+  # Serves *body* on 127.0.0.1 (over TLS when *tls* is given) and yields the metadata URL.
+  def with_metadata_server(body : String, status = 200, tls : OpenSSL::SSL::Context::Server? = nil, &)
+    server = QuietTLSServer.new do |context|
+      context.response.status_code = status
+      context.response.content_type = "application/samlmetadata+xml"
+      context.response.print body
+    end
+    address = tls ? server.bind_tls("127.0.0.1", 0, tls) : server.bind_tcp("127.0.0.1", 0)
+    spawn { server.listen }
+    Fiber.yield
+    begin
+      yield "#{tls ? "https" : "http"}://127.0.0.1:#{address.port}/metadata.xml"
+    ensure
+      server.close
+    end
+  end
 
-    property :body
+  def assert_fingerprint(expected : String, actual, file = __FILE__, line = __LINE__)
+    assert_equal expected, actual, nil, file, line
+  end
+
+  def self_signed_tls : OpenSSL::SSL::Context::Server
+    context = OpenSSL::SSL::Context::Server.new
+    # The fixture certificate is an old 1024-bit test certificate.
+    context.security_level = 0
+    context.certificate_chain = File.join(__DIR__, "certificates", "crystal-saml.crt")
+    context.private_key = File.join(__DIR__, "certificates", "crystal-saml.key")
+    context
   end
 
   describe "parsing an IdP descriptor file" do
@@ -26,36 +58,36 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal "https://hello.example.com/access/saml/idp.xml", settings.idp_entity_id
       assert_equal "https://hello.example.com/access/saml/login", settings.idp_sso_service_url
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_sso_service_binding
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
       assert_equal "https://hello.example.com/access/saml/logout", settings.idp_slo_service_url
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_slo_service_binding
       assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", settings.name_identifier_format
       assert_equal ["AuthToken", "SSOStartPage"], settings.idp_attribute_names
-      assert_equal "2014-04-17T18:02:33.910Z", settings.valid_until
+      assert_equal time("2014-04-17T18:02:33.910Z"), settings.valid_until
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
     end
 
-    it "extract certificate from md:KeyDescriptor[@use='signing']" do
+    it "extract certificate from md KeyDescriptor[@use='signing']" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor
       settings = idp_metadata_parser.parse(idp_metadata)
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
     end
 
-    it "extract certificate from md:KeyDescriptor[@use='encryption']" do
-      idp_metadata_parser = Saml::IdpMetadataParser.new
-      idp_metadata = idp_metadata_descriptor
-      idp_metadata = idp_metadata.sub(/<md:KeyDescriptor use="signing">(.*?)<\/md:KeyDescriptor>/m, "")
-      settings = idp_metadata_parser.parse(idp_metadata)
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
-    end
-
-    it "extract certificate from md:KeyDescriptor" do
+    it "extract certificate from md KeyDescriptor[@use='encryption']" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor
       idp_metadata = idp_metadata.sub(/<md:KeyDescriptor use="signing">(.*?)<\/md:KeyDescriptor>/m, "")
-      idp_metadata = idp_metadata.sub('<md:KeyDescriptor use="encryption">', "<md:KeyDescriptor>")
       settings = idp_metadata_parser.parse(idp_metadata)
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
+    end
+
+    it "extract certificate from md KeyDescriptor" do
+      idp_metadata_parser = Saml::IdpMetadataParser.new
+      idp_metadata = idp_metadata_descriptor
+      idp_metadata = idp_metadata.sub(/<md:KeyDescriptor use="signing">(.*?)<\/md:KeyDescriptor>/m, "")
+      idp_metadata = idp_metadata.sub(%(<md:KeyDescriptor use="encryption">), "<md:KeyDescriptor>")
+      settings = idp_metadata_parser.parse(idp_metadata)
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
     end
 
     it "extract SSO endpoint with no specific binding, it takes the first" do
@@ -69,7 +101,7 @@ class IdpMetadataParserTest < Minitest::Test
     it "extract SSO endpoint with specific binding as a String" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor3
-      options = {}
+      options = {} of Symbol => Saml::IdpMetadataParser::Option
       options[:sso_binding] = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
       options[:slo_binding] = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
       settings = idp_metadata_parser.parse(idp_metadata, options)
@@ -89,7 +121,7 @@ class IdpMetadataParserTest < Minitest::Test
     it "extract SSO endpoint with specific binding as an Array" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor3
-      options = {}
+      options = {} of Symbol => Saml::IdpMetadataParser::Option
       options[:sso_binding] = ["urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"]
       options[:slo_binding] = ["urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"]
       settings = idp_metadata_parser.parse(idp_metadata, options)
@@ -124,7 +156,7 @@ class IdpMetadataParserTest < Minitest::Test
     it "extract NameIDFormat specific priority as a String" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor3
-      options = {}
+      options = {} of Symbol => Saml::IdpMetadataParser::Option
       options[:name_id_format] = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
       settings = idp_metadata_parser.parse(idp_metadata, options)
       assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", settings.name_identifier_format
@@ -141,7 +173,7 @@ class IdpMetadataParserTest < Minitest::Test
     it "extract NameIDFormat specific priority as an Array" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor3
-      options = {}
+      options = {} of Symbol => Saml::IdpMetadataParser::Option
       options[:name_id_format] = ["urn:oasis:names:tc:SAML:2.0:nameid-format:persistent", "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"]
       settings = idp_metadata_parser.parse(idp_metadata, options)
       assert_equal "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent", settings.name_identifier_format
@@ -157,27 +189,42 @@ class IdpMetadataParserTest < Minitest::Test
       settings = idp_metadata_parser.parse(idp_metadata, {
         :settings => {
           :security => {
-            :digest_method => XMLSecurity::Document::SHA256,
+            :digest_method    => XMLSecurity::Document::SHA256,
             :signature_method => XMLSecurity::Document::RSA_SHA256,
-          },
-        },
-      })
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
+          } of Symbol => Saml::Settings::SecurityValue,
+        } of Symbol => Saml::Settings::Value,
+      } of Symbol => Saml::IdpMetadataParser::Option)
       assert_equal XMLSecurity::Document::SHA256, settings.security[:digest_method]
       assert_equal XMLSecurity::Document::RSA_SHA256, settings.security[:signature_method]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
     end
 
     it "merges results into given settings object" do
-      settings = Saml::Settings.new(:security => {
-                                                    :digest_method => XMLSecurity::Document::SHA256,
-                                                    :signature_method => XMLSecurity::Document::RSA_SHA256,
-                                                  })
+      settings = Saml::Settings.new({:security => {
+        :digest_method    => XMLSecurity::Document::SHA256,
+        :signature_method => XMLSecurity::Document::RSA_SHA256,
+      }})
 
-      Saml::IdpMetadataParser.new.parse(idp_metadata_descriptor, :settings => settings)
+      Saml::IdpMetadataParser.new.parse(idp_metadata_descriptor, {:settings => settings})
 
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
       assert_equal XMLSecurity::Document::SHA256, settings.security[:digest_method]
       assert_equal XMLSecurity::Document::RSA_SHA256, settings.security[:signature_method]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
+    end
+
+    it "raises on metadata with a DOCTYPE" do
+      idp_metadata = idp_metadata_descriptor.sub(%(<?xml version="1.0" encoding="UTF-8"?>), %(<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE md:EntityDescriptor [<!ENTITY idp "https://evil.example.com">]>))
+      exception = assert_raises(Saml::XMLLoadError) do
+        Saml::IdpMetadataParser.new.parse(idp_metadata)
+      end
+      assert_match("No Doctype nodes allowed", exception.message.to_s)
+    end
+
+    it "raises on malformed metadata instead of repairing it" do
+      idp_metadata = idp_metadata_descriptor.sub("</md:IDPSSODescriptor>", "")
+      assert_raises(Saml::XMLLoadError) do
+        Saml::IdpMetadataParser.new.parse(idp_metadata)
+      end
     end
   end
 
@@ -190,36 +237,36 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal "https://hello.example.com/access/saml/idp.xml", metadata[:idp_entity_id]
       assert_equal "https://hello.example.com/access/saml/login", metadata[:idp_sso_service_url]
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", metadata[:idp_sso_service_binding]
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", metadata[:idp_cert_fingerprint]
       assert_equal "https://hello.example.com/access/saml/logout", metadata[:idp_slo_service_url]
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", metadata[:idp_slo_service_binding]
       assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", metadata[:name_identifier_format]
       assert_equal ["AuthToken", "SSOStartPage"], metadata[:idp_attribute_names]
       assert_equal "2014-04-17T18:02:33.910Z", metadata[:valid_until]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", metadata[:idp_cert_fingerprint]
     end
 
-    it "extract certificate from md:KeyDescriptor[@use='signing']" do
+    it "extract certificate from md KeyDescriptor[@use='signing']" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor
       metadata = idp_metadata_parser.parse_to_hash(idp_metadata)
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", metadata[:idp_cert_fingerprint]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", metadata[:idp_cert_fingerprint]
     end
 
-    it "extract certificate from md:KeyDescriptor[@use='encryption']" do
+    it "extract certificate from md KeyDescriptor[@use='encryption']" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor
       idp_metadata = idp_metadata.sub(/<md:KeyDescriptor use="signing">(.*?)<\/md:KeyDescriptor>/m, "")
       parsed_metadata = idp_metadata_parser.parse_to_hash(idp_metadata)
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
     end
 
-    it "extract certificate from md:KeyDescriptor" do
+    it "extract certificate from md KeyDescriptor" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor
       idp_metadata = idp_metadata.sub(/<md:KeyDescriptor use="signing">(.*?)<\/md:KeyDescriptor>/m, "")
-      idp_metadata = idp_metadata.sub('<md:KeyDescriptor use="encryption">', "<md:KeyDescriptor>")
+      idp_metadata = idp_metadata.sub(%(<md:KeyDescriptor use="encryption">), "<md:KeyDescriptor>")
       parsed_metadata = idp_metadata_parser.parse_to_hash(idp_metadata)
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
     end
 
     it "extract SSO endpoint with no specific binding, it takes the first" do
@@ -233,7 +280,7 @@ class IdpMetadataParserTest < Minitest::Test
     it "extract SSO endpoint with specific binding" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor3
-      options = {}
+      options = {} of Symbol => Saml::IdpMetadataParser::Option
       options[:sso_binding] = ["urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"]
       parsed_metadata = idp_metadata_parser.parse_to_hash(idp_metadata, options)
       assert_equal "https://idp.example.com/idp/profile/SAML2/POST/SSO", parsed_metadata[:idp_sso_service_url]
@@ -250,19 +297,19 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", parsed_metadata[:idp_sso_service_binding]
     end
 
-    it "ignores a given :settings hash" do
+    it "ignores a given settings hash" do
       idp_metadata_parser = Saml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor
       parsed_metadata = idp_metadata_parser.parse_to_hash(idp_metadata, {
         :settings => {
           :security => {
-            :digest_method => XMLSecurity::Document::SHA256,
+            :digest_method    => XMLSecurity::Document::SHA256,
             :signature_method => XMLSecurity::Document::RSA_SHA256,
-          },
-        },
-      })
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
-      assert_nil parsed_metadata[:security]
+          } of Symbol => Saml::Settings::SecurityValue,
+        } of Symbol => Saml::Settings::Value,
+      } of Symbol => Saml::IdpMetadataParser::Option)
+      assert_nil parsed_metadata[:security]?
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
     end
 
     it "can extract certificates multiple times in sequence" do
@@ -272,8 +319,8 @@ class IdpMetadataParserTest < Minitest::Test
       metadata1 = idp_metadata_parser.parse_to_hash(idp_metadata1)
       metadata2 = idp_metadata_parser.parse_to_hash(idp_metadata2)
 
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", metadata1[:idp_cert_fingerprint]
-      assert_equal "CD:2B:2B:DA:FF:F5:DB:64:10:7C:AC:FD:FE:0F:CB:5D:73:5F:16:07", metadata2[:idp_cert_fingerprint]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", metadata1[:idp_cert_fingerprint]
+      assert_fingerprint "CD:2B:2B:DA:FF:F5:DB:64:10:7C:AC:FD:FE:0F:CB:5D:73:5F:16:07", metadata2[:idp_cert_fingerprint]
     end
   end
 
@@ -293,83 +340,88 @@ class IdpMetadataParserTest < Minitest::Test
 
       assert_nil settings.idp_cert_fingerprint
       assert_nil settings.idp_cert
-      assert_equal 2, settings.idp_cert_multi.size
-      assert settings.idp_cert_multi.has_key?(:signing)
-      assert_equal 2, settings.idp_cert_multi[:signing].size
-      assert settings.idp_cert_multi.has_key?(:encryption)
-      assert_equal 1, settings.idp_cert_multi[:encryption].size
+      assert_equal 2, settings.idp_cert_multi.not_nil!.size
+      assert settings.idp_cert_multi.not_nil!.has_key?(:signing)
+      assert_equal 2, settings.idp_cert_multi.not_nil![:signing].size
+      assert settings.idp_cert_multi.not_nil!.has_key?(:encryption)
+      assert_equal 1, settings.idp_cert_multi.not_nil![:encryption].size
     end
   end
 
   describe "download and parse IdP descriptor file" do
-    before do
-      mock_response = MockSuccessResponse.new
-      mock_response.body = idp_metadata_descriptor
-      @url = "https://example.com"
-      uri = URI(@url)
+    it "extract settings from remote xml" do
+      with_metadata_server(idp_metadata_descriptor) do |url|
+        idp_metadata_parser = Saml::IdpMetadataParser.new
+        settings = idp_metadata_parser.parse_remote(url)
 
-      @http = Net::HTTP.new(uri.host, uri.port)
-      Net::HTTP.expects(:new).returns(@http)
-      @http.expects(:request).returns(mock_response)
+        assert_equal "https://hello.example.com/access/saml/idp.xml", settings.idp_entity_id
+        assert_equal "https://hello.example.com/access/saml/login", settings.idp_sso_service_url
+        assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_sso_service_binding
+        assert_equal "https://hello.example.com/access/saml/logout", settings.idp_slo_service_url
+        assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_slo_service_binding
+        assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", settings.name_identifier_format
+        assert_equal ["AuthToken", "SSOStartPage"], settings.idp_attribute_names
+        assert_equal time("2014-04-17T18:02:33.910Z"), settings.valid_until
+        assert_equal 200, idp_metadata_parser.response.not_nil!.status_code
+        assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
+      end
     end
 
-    it "extract settings from remote xml" do
-      idp_metadata_parser = Saml::IdpMetadataParser.new
-      settings = idp_metadata_parser.parse_remote(@url)
-
-      assert_equal "https://hello.example.com/access/saml/idp.xml", settings.idp_entity_id
-      assert_equal "https://hello.example.com/access/saml/login", settings.idp_sso_service_url
-      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_sso_service_binding
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.idp_cert_fingerprint
-      assert_equal "https://hello.example.com/access/saml/logout", settings.idp_slo_service_url
-      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_slo_service_binding
-      assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", settings.name_identifier_format
-      assert_equal ["AuthToken", "SSOStartPage"], settings.idp_attribute_names
-      assert_equal "2014-04-17T18:02:33.910Z", settings.valid_until
-      assert_equal OpenSSL::SSL::VERIFY_PEER, @http.verify_mode
+    it "rejects a self signed certificate by default" do
+      with_metadata_server(idp_metadata_descriptor, tls: self_signed_tls) do |url|
+        exception = assert_raises(Saml::HttpError) do
+          Saml::IdpMetadataParser.new.parse_remote(url)
+        end
+        assert_match("Failed to fetch idp metadata", exception.message.to_s)
+      end
     end
 
     it "accept self signed certificate if insturcted" do
-      idp_metadata_parser = Saml::IdpMetadataParser.new
-      idp_metadata_parser.parse_remote(@url, false)
-
-      assert_equal OpenSSL::SSL::VERIFY_NONE, @http.verify_mode
+      with_metadata_server(idp_metadata_descriptor, tls: self_signed_tls) do |url|
+        settings = Saml::IdpMetadataParser.new.parse_remote(url, false)
+        assert_equal "https://hello.example.com/access/saml/idp.xml", settings.idp_entity_id
+      end
     end
   end
 
   describe "download and parse IdP descriptor file into an Hash" do
-    before do
-      mock_response = MockSuccessResponse.new
-      mock_response.body = idp_metadata_descriptor
-      @url = "https://example.com"
-      uri = URI(@url)
+    it "extract settings from remote xml" do
+      with_metadata_server(idp_metadata_descriptor) do |url|
+        idp_metadata_parser = Saml::IdpMetadataParser.new
+        parsed_metadata = idp_metadata_parser.parse_remote_to_hash(url)
 
-      @http = Net::HTTP.new(uri.host, uri.port)
-      Net::HTTP.expects(:new).returns(@http)
-      @http.expects(:request).returns(mock_response)
+        assert_equal "https://hello.example.com/access/saml/idp.xml", parsed_metadata[:idp_entity_id]
+        assert_equal "https://hello.example.com/access/saml/login", parsed_metadata[:idp_sso_service_url]
+        assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", parsed_metadata[:idp_sso_service_binding]
+        assert_equal "https://hello.example.com/access/saml/logout", parsed_metadata[:idp_slo_service_url]
+        assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", parsed_metadata[:idp_slo_service_binding]
+        assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", parsed_metadata[:name_identifier_format]
+        assert_equal ["AuthToken", "SSOStartPage"], parsed_metadata[:idp_attribute_names]
+        assert_equal "2014-04-17T18:02:33.910Z", parsed_metadata[:valid_until]
+        assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
+      end
     end
 
-    it "extract settings from remote xml" do
-      idp_metadata_parser = Saml::IdpMetadataParser.new
-      parsed_metadata = idp_metadata_parser.parse_remote_to_hash(@url)
-
-      assert_equal "https://hello.example.com/access/saml/idp.xml", parsed_metadata[:idp_entity_id]
-      assert_equal "https://hello.example.com/access/saml/login", parsed_metadata[:idp_sso_service_url]
-      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", parsed_metadata[:idp_sso_service_binding]
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", parsed_metadata[:idp_cert_fingerprint]
-      assert_equal "https://hello.example.com/access/saml/logout", parsed_metadata[:idp_slo_service_url]
-      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", parsed_metadata[:idp_slo_service_binding]
-      assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", parsed_metadata[:name_identifier_format]
-      assert_equal ["AuthToken", "SSOStartPage"], parsed_metadata[:idp_attribute_names]
-      assert_equal "2014-04-17T18:02:33.910Z", parsed_metadata[:valid_until]
-      assert_equal OpenSSL::SSL::VERIFY_PEER, @http.verify_mode
+    it "rejects a self signed certificate by default" do
+      with_metadata_server(idp_metadata_descriptor, tls: self_signed_tls) do |url|
+        assert_raises(Saml::HttpError) do
+          Saml::IdpMetadataParser.new.parse_remote_to_hash(url)
+        end
+      end
     end
 
     it "accept self signed certificate if insturcted" do
-      idp_metadata_parser = Saml::IdpMetadataParser.new
-      idp_metadata_parser.parse_remote_to_hash(@url, false)
+      with_metadata_server(idp_metadata_descriptor, tls: self_signed_tls) do |url|
+        parsed_metadata = Saml::IdpMetadataParser.new.parse_remote_to_hash(url, false)
+        assert_equal "https://hello.example.com/access/saml/idp.xml", parsed_metadata[:idp_entity_id]
+      end
+    end
 
-      assert_equal OpenSSL::SSL::VERIFY_NONE, @http.verify_mode
+    it "extracts every descriptor from remote xml" do
+      with_metadata_server(idp_metadata_multiple_descriptors2) do |url|
+        parsed = Saml::IdpMetadataParser.new.parse_remote_to_array(url)
+        assert_equal ["https://foo.example.com/access/saml/idp.xml", "https://bar.example.com/access/saml/idp.xml"], parsed.map(&.[:idp_entity_id])
+      end
     end
   end
 
@@ -384,22 +436,56 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal("url must begin with http or https", exception.message)
     end
 
-    it "raises an exception when unable to download metadata" do
-      mock_response = MockFailureResponse.new
-      @url = "https://example.com"
-      uri = URI(@url)
-
-      @http = Net::HTTP.new(uri.host, uri.port)
-      Net::HTTP.expects(:new).returns(@http)
-      @http.expects(:request).returns(mock_response)
-
-      idp_metadata_parser = Saml::IdpMetadataParser.new
-
-      exception = assert_raises(Saml::HttpError) do
-        idp_metadata_parser.parse_remote("https://hello.example.com/access/saml/idp.xml")
+    it "raises an exception when the url is not http(s)" do
+      exception = assert_raises(ArgumentError) do
+        Saml::IdpMetadataParser.new.parse_remote("file:///etc/passwd")
       end
+      assert_equal("url must begin with http or https", exception.message)
+    end
 
-      assert_match("Failed to fetch idp metadata", exception.message)
+    it "raises an exception when unable to download metadata" do
+      with_metadata_server("Not Found", status: 404) do |url|
+        idp_metadata_parser = Saml::IdpMetadataParser.new
+
+        exception = assert_raises(Saml::HttpError) do
+          idp_metadata_parser.parse_remote(url)
+        end
+
+        assert_match("Failed to fetch idp metadata", exception.message.to_s)
+        assert_match("404", exception.message.to_s)
+      end
+    end
+
+    it "raises an exception when the server can't be reached" do
+      port = TCPServer.open("127.0.0.1", 0) { |server| server.local_address.port }
+      assert_raises(Saml::HttpError) do
+        Saml::IdpMetadataParser.new.parse_remote("http://127.0.0.1:#{port}/metadata.xml")
+      end
+    end
+
+    it "raises an exception when the metadata is larger than max_bytesize" do
+      with_metadata_server(idp_metadata_descriptor) do |url|
+        exception = assert_raises(Saml::HttpError) do
+          Saml::IdpMetadataParser.new.parse_remote(url, true, {:max_bytesize => idp_metadata_descriptor.bytesize - 1})
+        end
+        assert_match("larger than #{idp_metadata_descriptor.bytesize - 1} bytes", exception.message.to_s)
+      end
+    end
+
+    it "accepts metadata exactly max_bytesize long" do
+      with_metadata_server(idp_metadata_descriptor) do |url|
+        settings = Saml::IdpMetadataParser.new.parse_remote(url, true, {:max_bytesize => idp_metadata_descriptor.bytesize})
+        assert_equal "https://hello.example.com/access/saml/idp.xml", settings.idp_entity_id
+      end
+    end
+
+    it "refuses remote metadata with a DOCTYPE" do
+      doctype = idp_metadata_descriptor.sub(%(<?xml version="1.0" encoding="UTF-8"?>), %(<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE md:EntityDescriptor>))
+      with_metadata_server(doctype) do |url|
+        assert_raises(Saml::XMLLoadError) do
+          Saml::IdpMetadataParser.new.parse_remote(url)
+        end
+      end
     end
   end
 
@@ -415,30 +501,30 @@ class IdpMetadataParserTest < Minitest::Test
 
     it "if ValidUntil and not CacheDuration return ValidUntil value" do
       settings = @idp_metadata_parser.parse(idp_metadata_descriptor)
-      assert_equal "2014-04-17T18:02:33.910Z", settings.valid_until
+      assert_equal time("2014-04-17T18:02:33.910Z"), settings.valid_until
     end
 
     it "if no ValidUntil but CacheDuration return CacheDuration converted in ValidUntil" do
-      Timecop(Time.parse("2020-01-02T10:02:33Z", Time.utc)) do
+      Timecop.freeze(time("2020-01-02T10:02:33Z")) do
         settings = @idp_metadata_parser.parse(idp_metadata_descriptor5)
-        assert_equal "2020-01-03T10:02:33Z", settings.valid_until
+        assert_equal time("2020-01-03T10:02:33Z"), settings.valid_until
       end
     end
 
     it "if ValidUntil and CacheDuration return the sooner timestamp" do
-      Timecop(Time.parse("2020-01-01T10:12:55Z", Time.utc)) do
+      Timecop.freeze(time("2020-01-01T10:12:55Z")) do
         settings = @idp_metadata_parser.parse(idp_metadata_descriptor6)
-        assert_equal "2020-01-03T10:12:55Z", settings.valid_until
+        assert_equal time("2020-01-03T10:12:55Z"), settings.valid_until
       end
 
-      Timecop(Time.parse("2020-01-01T10:12:55Z", Time.utc)) do
+      Timecop.freeze(time("2020-01-01T10:12:55Z")) do
         settings = @idp_metadata_parser.parse(idp_metadata_descriptor6)
-        assert_equal "2020-01-03T10:12:55Z", settings.valid_until
+        assert_equal time("2020-01-03T10:12:55Z"), settings.valid_until
       end
 
-      Timecop(Time.parse("2020-01-03T10:12:55Z", Time.utc)) do
+      Timecop.freeze(time("2020-01-03T10:12:55Z")) do
         settings = @idp_metadata_parser.parse(idp_metadata_descriptor6)
-        assert_equal "2020-01-04T18:02:33.910Z", settings.valid_until
+        assert_equal time("2020-01-04T18:02:33.910Z"), settings.valid_until
       end
     end
   end
@@ -457,7 +543,7 @@ class IdpMetadataParserTest < Minitest::Test
     it "should find named descriptor" do
       entity_id = "https://bar.example.com/access/saml/idp.xml"
       settings = @idp_metadata_parser.parse(
-        @idp_metadata, :entity_id => entity_id,
+        @idp_metadata, {:entity_id => entity_id},
       )
       assert_equal entity_id, settings.idp_entity_id
     end
@@ -466,21 +552,21 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified", @settings.name_identifier_format
       assert_equal "https://hello.example.com/access/saml/login", @settings.idp_sso_service_url
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", @settings.idp_sso_service_binding
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", @settings.idp_cert_fingerprint
       assert_equal "https://hello.example.com/access/saml/logout", @settings.idp_slo_service_url
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", @settings.idp_slo_service_binding
       assert_equal ["AuthToken", "SSOStartPage"], @settings.idp_attribute_names
-      assert_equal "2014-04-17T18:02:33.910Z", @settings.valid_until
+      assert_equal time("2014-04-17T18:02:33.910Z"), @settings.valid_until
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", @settings.idp_cert_fingerprint
     end
 
     it "should handle multiple descriptors at once" do
       settings = @idp_metadata_parser.parse_to_array(@idp_metadata)
       assert_equal "https://foo.example.com/access/saml/idp.xml", settings.first[:idp_entity_id]
-      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.first[:idp_cert_fingerprint]
       assert_equal "2014-04-17T18:02:33.910Z", settings.first[:valid_until]
       assert_equal "https://bar.example.com/access/saml/idp.xml", settings.last[:idp_entity_id]
-      assert_equal "08:EB:6E:60:A2:14:4E:89:EC:FA:05:74:9D:72:BF:5D:BE:54:F0:1A", settings.last[:idp_cert_fingerprint]
       assert_equal "2014-04-17T18:02:33.910Z", settings.last[:valid_until]
+      assert_fingerprint "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", settings.first[:idp_cert_fingerprint]
+      assert_fingerprint "08:EB:6E:60:A2:14:4E:89:EC:FA:05:74:9D:72:BF:5D:BE:54:F0:1A", settings.last[:idp_cert_fingerprint]
     end
   end
 
@@ -506,7 +592,7 @@ class IdpMetadataParserTest < Minitest::Test
       assert_nil @settings.idp_cert
       assert_nil @settings.idp_cert_fingerprint
 
-      expected_multi_cert = {}
+      expected_multi_cert = {} of Symbol => Array(String)
       expected_multi_cert[:signing] = ["MIIEZTCCA02gAwIBAgIUPyy/A3bZAZ4m28PzEUUoT7RJhxIwDQYJKoZIhvcNAQEF
 BQAwcjELMAkGA1UEBhMCVVMxKzApBgNVBAoMIk9uZUxvZ2luIFRlc3QgKHNnYXJj
 aWEtdXMtcHJlcHJvZCkxFTATBgNVBAsMDE9uZUxvZ2luIElkUDEfMB0GA1UEAwwW
@@ -577,7 +663,7 @@ WQO0LPxPqRiUqUzyhDhLo/xXNrHCu4VbMw=="]
       assert_nil @settings.idp_cert
       assert_nil @settings.idp_cert_fingerprint
 
-      expected_multi_cert = {}
+      expected_multi_cert = {} of Symbol => Array(String)
       expected_multi_cert[:signing] = ["MIIEZTCCA02gAwIBAgIUPyy/A3bZAZ4m28PzEUUoT7RJhxIwDQYJKoZIhvcNAQEF
 BQAwcjELMAkGA1UEBhMCVVMxKzApBgNVBAoMIk9uZUxvZ2luIFRlc3QgKHNnYXJj
 aWEtdXMtcHJlcHJvZCkxFTATBgNVBAsMDE9uZUxvZ2luIElkUDEfMB0GA1UEAwwW
@@ -649,13 +735,13 @@ QOPR6cEwFZzP0tHTYbI839WgxX6hfhIUTUz6mLqq4+3P4BG3+1OXeVDg63y8Uh78
     it "should return idp_cert and idp_cert_fingerprint and no idp_cert_multi" do
       assert_equal(expected_cert, @settings.idp_cert)
       assert_equal("2D:A9:40:88:28:EE:67:BB:4A:5B:E0:58:A7:CC:71:95:2D:1B:C9:D3", @settings.idp_cert_fingerprint)
-      assert_equal({ :signing => [expected_cert], :encryption => [expected_cert] }, @settings.idp_cert_multi)
+      assert_equal({:signing => [expected_cert], :encryption => [expected_cert]}, @settings.idp_cert_multi)
       assert_equal("https://app.onelogin.com/saml/metadata/383123", @settings.idp_entity_id)
       assert_equal("urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress", @settings.name_identifier_format)
       assert_equal("https://app.onelogin.com/trust/saml2/http-post/sso/383123", @settings.idp_sso_service_url)
       assert_nil(@settings.idp_slo_service_url)
-      # TODO: next line can be changed to `assert_nil @settings.idp_slo_service_binding` after :embed_sign is removed.
-      assert_nil(@settings.instance_variable_get("@idp_slo_service_binding"))
+      # The getter falls back to the embed_sign binding, so check the parsed value.
+      assert_nil(@idp_metadata_parser.parse_to_hash(@idp_metadata)[:idp_slo_service_binding])
     end
   end
 
@@ -670,7 +756,7 @@ QOPR6cEwFZzP0tHTYbI839WgxX6hfhIUTUz6mLqq4+3P4BG3+1OXeVDg63y8Uh78
       assert_nil @settings.idp_cert
       assert_nil @settings.idp_cert_fingerprint
 
-      expected_multi_cert = {}
+      expected_multi_cert = {} of Symbol => Array(String)
       expected_multi_cert[:signing] = ["MIIEHjCCAwagAwIBAgIBATANBgkqhkiG9w0BAQUFADBnMQswCQYDVQQGEwJVUzET
 MBEGA1UECAwKQ2FsaWZvcm5pYTEVMBMGA1UEBwwMU2FudGEgTW9uaWNhMREwDwYD
 VQQKDAhPbmVMb2dpbjEZMBcGA1UEAwwQYXBwLm9uZWxvZ2luLmNvbTAeFw0xMzA2
@@ -725,8 +811,8 @@ WQO0LPxPqRiUqUzyhDhLo/xXNrHCu4VbMw=="]
       assert_equal "https://app.onelogin.com/trust/saml2/http-post/sso/383123", @settings.idp_sso_service_url
       assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", @settings.idp_sso_service_binding
       assert_nil @settings.idp_slo_service_url
-      # TODO: next line can be changed to `assert_nil @settings.idp_slo_service_binding` after :embed_sign is removed.
-      assert_nil @settings.instance_variable_get("@idp_slo_service_binding")
+      # The getter falls back to the embed_sign binding, so check the parsed value.
+      assert_nil @idp_metadata_parser.parse_to_hash(@idp_metadata)[:idp_slo_service_binding]
     end
   end
 
